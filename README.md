@@ -1,9 +1,9 @@
-#Cave Explorer 2
+# Cave Explorer 2
 A game I will hopefully finish. More information will be added here when I
 hopefully get further along.
 
 
-##Cave Explorer
+## Cave Explorer
 Here is a link to my [original cave
 explorer](https://github.com/ta2000/cave_explorer) game, which I built on
 windows and can no longer figure out how to build. Unforunately, I do not have
