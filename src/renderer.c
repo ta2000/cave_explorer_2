@@ -122,7 +122,10 @@ VkInstance get_vk_instance()
     );
     assert(result == VK_SUCCESS);
 
+    for (i=0; i<all_extension_count; i++)
+        free(all_extensions[i]);
     free(all_extensions);
+    free(available_layers);
 
     return instance;
 }
