@@ -13,9 +13,45 @@
 
 #define VALIDATION_ENABLED 1
 
-VkInstance get_vk_instance()
+void renderer_prepare_vk(GLFWwindow* window)
 {
     VkInstance instance;
+    instance = renderer_get_vk_instance();
+    assert(instance != VK_NULL_HANDLE);
+
+    PFN_vkCreateDebugReportCallbackEXT fp_create_debug_callback;
+    fp_create_debug_callback =
+            (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(
+                    instance,
+                    "vkCreateDebugReportCallbackEXT"
+            );
+    assert(*fp_create_debug_callback);
+
+    VkDebugReportCallbackEXT debug_callback;
+    debug_callback = renderer_get_debug_callback(
+        instance,
+        fp_create_debug_callback
+    );
+
+    VkSurfaceKHR surface;
+    surface = renderer_get_vk_surface(
+        instance,
+        window
+    );
+    assert(surface != VK_NULL_HANDLE);
+
+    VkPhysicalDevice physical_device;
+    physical_device = renderer_get_vk_physical_device(
+        instance,
+        surface
+    );
+    assert(physical_device != VK_NULL_HANDLE);
+}
+
+VkInstance renderer_get_vk_instance()
+{
+    VkInstance instance_handle;
+    instance_handle = VK_NULL_HANDLE;
 
 	// Create info
     VkInstanceCreateInfo create_info;
@@ -90,7 +126,9 @@ VkInstance get_vk_instance()
     // Extensions
     const char** glfw_extensions;
     uint32_t glfw_extension_count;
-    glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
+    glfw_extensions = glfwGetRequiredInstanceExtensions(
+        &glfw_extension_count
+    );
 
     const char* my_extensions[] = {VK_EXT_DEBUG_REPORT_EXTENSION_NAME};
     uint32_t my_extension_count = 1;
@@ -118,7 +156,7 @@ VkInstance get_vk_instance()
     result = vkCreateInstance(
         &create_info,
         NULL,
-        &instance
+        &instance_handle
     );
     assert(result == VK_SUCCESS);
 
@@ -127,5 +165,260 @@ VkInstance get_vk_instance()
     free(all_extensions);
     free(available_layers);
 
-    return instance;
+    return instance_handle;
+}
+
+VkDebugReportCallbackEXT renderer_get_debug_callback(
+        VkInstance instance,
+        PFN_vkCreateDebugReportCallbackEXT fp_create_debug_callback)
+{
+    VkDebugReportCallbackEXT debug_callback_handle;
+
+    VkDebugReportCallbackCreateInfoEXT debug_info;
+    debug_info.sType =
+        VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
+    debug_info.pNext = NULL;
+    debug_info.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT |
+                        VK_DEBUG_REPORT_WARNING_BIT_EXT;
+    debug_info.pUserData = NULL;
+    debug_info.pfnCallback = &renderer_debug_callback;
+
+    VkResult result;
+    result = fp_create_debug_callback(
+                instance,
+                &debug_info,
+                NULL,
+                &debug_callback_handle
+            );
+    assert(result == VK_SUCCESS);
+
+    return debug_callback_handle;
+}
+
+VKAPI_ATTR VkBool32 VKAPI_CALL renderer_debug_callback(
+        VkDebugReportFlagsEXT flags,
+        VkDebugReportObjectTypeEXT obj_type,
+        uint64_t obj,
+        size_t location,
+        int32_t code,
+        const char* p_layer_prefix,
+        const char* p_msg,
+        void* p_user_data)
+{
+    // Alloc extra chars for additional info
+    char* message = malloc(strlen(p_msg) + 256);
+    assert(message);
+
+    if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT)
+    {
+        sprintf(message, "%s error, code %d: %s",
+                p_layer_prefix, code, p_msg);
+    }
+    else if (flags & VK_DEBUG_REPORT_WARNING_BIT_EXT)
+    {
+        sprintf(message, "%s warning, code %d: %s",
+                p_layer_prefix, code, p_msg);
+    }
+    else
+    {
+        free(message);
+        return VK_FALSE;
+    }
+
+    fprintf(stderr, "%s\n", message);
+
+    free(message);
+
+    return VK_FALSE;
+}
+
+VkSurfaceKHR renderer_get_vk_surface(
+        VkInstance instance,
+        GLFWwindow* window)
+{
+    VkSurfaceKHR surface_handle;
+
+    VkResult result;
+    result = glfwCreateWindowSurface(
+        instance,
+        window,
+        NULL,
+        &surface_handle
+    );
+    assert(result == VK_SUCCESS);
+
+    return surface_handle;
+}
+
+VkPhysicalDevice renderer_get_vk_physical_device(
+        VkInstance instance,
+        VkSurfaceKHR surface)
+{
+    VkPhysicalDevice physical_device_handle;
+    physical_device_handle = VK_NULL_HANDLE;
+
+    // Enumerate devices
+    VkPhysicalDevice* physical_devices;
+    uint32_t physical_device_count;
+
+    vkEnumeratePhysicalDevices(instance, &physical_device_count, NULL);
+    assert(physical_device_count > 0);
+
+    physical_devices = malloc(
+        physical_device_count * sizeof(*physical_devices)
+    );
+    assert(physical_devices);
+
+    vkEnumeratePhysicalDevices(
+        instance,
+        &physical_device_count,
+        physical_devices
+    );
+
+    const char* required_extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    uint32_t required_extension_count = 1;
+
+    uint32_t i;
+    for (i=0; i<physical_device_count; i++)
+    {
+        // Ensure required extensions are supported
+        if (physical_device_extensions_supported(
+                physical_devices[i],
+                required_extension_count,
+                required_extensions))
+        {
+            printf("Extensions not supported\n");
+            continue;
+        }
+
+        // Ensure there is at least one surface format
+        // compatible with the surface
+        uint32_t format_count;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(
+            physical_devices[i],
+            surface,
+            &format_count,
+            NULL
+        );
+        if (format_count < 1) {
+            printf("No surface formats available\n");
+            continue;
+        }
+
+        // Ensured there is at least one present mode available
+        uint32_t present_mode_count;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(
+            physical_devices[i],
+            surface,
+            &present_mode_count,
+            NULL
+        );
+        if (present_mode_count < 1) {
+            printf("No present modes available for surface\n");
+            continue;
+        }
+
+        // Ensure the physical device has WSI
+        VkQueueFamilyProperties* queue_family_properties;
+        uint32_t queue_family_count;
+
+        vkGetPhysicalDeviceQueueFamilyProperties(
+            physical_devices[i],
+            &queue_family_count,
+            NULL
+        );
+
+        queue_family_properties = malloc(
+            queue_family_count * sizeof(*queue_family_properties)
+        );
+
+        vkGetPhysicalDeviceQueueFamilyProperties(
+            physical_devices[i],
+            &queue_family_count,
+            queue_family_properties
+        );
+
+        uint32_t queue_family;
+        VkBool32 wsi_support = VK_FALSE;
+        VkBool32 graphics_bit = VK_FALSE;
+        for (queue_family=0; queue_family<queue_family_count; queue_family++)
+        {
+            graphics_bit =
+                queue_family_properties[i].queueCount > 0 &&
+                queue_family_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT;
+
+            VkResult wsi_query_result;
+            wsi_query_result = vkGetPhysicalDeviceSurfaceSupportKHR(
+                physical_devices[i],
+                queue_family,
+                surface,
+                &wsi_support
+            );
+            assert(wsi_query_result == VK_SUCCESS);
+
+            if (wsi_support && graphics_bit)
+                break;
+        }
+        if (!(wsi_support && graphics_bit)) {
+            printf("Suitable GPU not found:\n");
+            printf("Window System Integration: %d\n", wsi_support);
+            printf("Graphical operations supported: %d\n", graphics_bit);
+            continue;
+        }
+
+        free(queue_family_properties);
+
+        physical_device_handle = physical_devices[i];
+        break;
+    }
+
+    return physical_device_handle;
+}
+
+bool physical_device_extensions_supported(
+    VkPhysicalDevice physical_device,
+    uint32_t required_extension_count,
+    const char** required_extensions)
+{
+    // Enumerate extensions for each device
+    VkExtensionProperties* available_extensions;
+    uint32_t available_extension_count;
+
+    vkEnumerateDeviceExtensionProperties(
+        physical_device,
+        NULL,
+        &available_extension_count,
+        NULL
+    );
+    assert(available_extension_count > 0);
+
+    available_extensions = malloc(
+        available_extension_count * sizeof(*available_extensions)
+    );
+    assert(available_extensions);
+
+    vkEnumerateDeviceExtensionProperties(
+        physical_device,
+        NULL,
+        &available_extension_count,
+        available_extensions
+    );
+
+    // Determine if device's extensions contain necessary extensions
+    uint32_t i, j;
+    for (i=0; i<required_extension_count; i++)
+    {
+        for (j=0; j<available_extension_count; j++)
+        {
+            if (strcmp(
+                    required_extensions[i],
+                    available_extensions[j].extensionName
+                ))
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
