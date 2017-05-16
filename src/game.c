@@ -32,6 +32,4 @@ void game_setup_vk_renderer(struct game* self)
     //glfwSetKeyCallback(window, keyCallback);
 
     renderer_prepare_vk(window);
-
-    printf("Vulkan initialized successfully.\n");
 }

@@ -15,6 +15,7 @@
 
 void renderer_prepare_vk(GLFWwindow* window)
 {
+    // Creation
     VkInstance instance;
     instance = renderer_get_vk_instance();
     assert(instance != VK_NULL_HANDLE);
@@ -27,8 +28,8 @@ void renderer_prepare_vk(GLFWwindow* window)
             );
     assert(*fp_create_debug_callback);
 
-    VkDebugReportCallbackEXT debug_callback;
-    debug_callback = renderer_get_debug_callback(
+    VkDebugReportCallbackEXT debug_callback_ext;
+    debug_callback_ext = renderer_get_debug_callback(
         instance,
         fp_create_debug_callback
     );
@@ -46,6 +47,25 @@ void renderer_prepare_vk(GLFWwindow* window)
         surface
     );
     assert(physical_device != VK_NULL_HANDLE);
+
+    printf("Vulkan initialized successfully\n");
+
+
+    // Destruction
+    vkDestroySurfaceKHR(instance, surface, NULL);
+
+    PFN_vkDestroyDebugReportCallbackEXT fp_destroy_debug_callback;
+    fp_destroy_debug_callback =
+            (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
+                    instance,
+                    "vkDestroyDebugReportCallbackEXT"
+            );
+    assert(*fp_destroy_debug_callback);
+    fp_destroy_debug_callback(instance, debug_callback_ext, NULL);
+
+    vkDestroyInstance(instance, NULL);
+
+    printf("Vulkan destroyed successfully\n");
 }
 
 VkInstance renderer_get_vk_instance()
