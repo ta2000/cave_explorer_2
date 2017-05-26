@@ -358,19 +358,19 @@ VkPhysicalDevice renderer_get_vk_physical_device(
             queue_family_properties
         );
 
-        uint32_t queue_family;
+        uint32_t j;
         VkBool32 wsi_support = VK_FALSE;
         VkBool32 graphics_bit = VK_FALSE;
-        for (queue_family=0; queue_family<queue_family_count; queue_family++)
+        for (j=0; j<queue_family_count; j++)
         {
             graphics_bit =
-                queue_family_properties[i].queueCount > 0 &&
-                queue_family_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT;
+                queue_family_properties[j].queueCount > 0 &&
+                queue_family_properties[j].queueFlags & VK_QUEUE_GRAPHICS_BIT;
 
             VkResult wsi_query_result;
             wsi_query_result = vkGetPhysicalDeviceSurfaceSupportKHR(
                 physical_devices[i],
-                queue_family,
+                j,
                 surface,
                 &wsi_support
             );
@@ -442,3 +442,105 @@ bool physical_device_extensions_supported(
 
     return true;
 }
+
+/*VkDevice renderer_get_device(
+        VkPhysicalDevice physical_device)
+{
+    VkDevice device_handle;
+    device_handle = VK_NULL_HANDLE;
+
+    uint32_t queue_family_count;
+    vkGetPhysicalDeviceQueueFamilyProperties(
+        physical_device,
+        &queue_family_index_count,
+        NULL
+    );
+
+    VkQueueFamilyProperties* queue_family_properties;
+    queue_family_properties = malloc(
+        queue_family_count * sizeof(*queue_family_properties)
+    );
+
+    vkGetPhysicalDeviceQueueFamilyProperties(
+        physical_devices[i],
+        &queue_family_count,
+        queue_family_properties
+    );
+
+    uint32_t i;
+    for (i=0; i<queue_family_count; i++)
+    {
+        if (queue_family_properties[i].queueCount > 0 &&
+            queue_family_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+        {
+            graphics_family_index = q
+        }
+
+        VkResult wsi_query_result;
+        wsi_query_result = vkGetPhysicalDeviceSurfaceSupportKHR(
+            physical_devices[i],
+            queue_family,
+            surface,
+            &wsi_support
+        );
+        assert(wsi_query_result == VK_SUCCESS);
+
+        if (wsi_support && graphics_bit)
+            break;
+    }
+    if (!(wsi_support && graphics_bit)) {
+        printf("Suitable GPU not found:\n");
+        printf("Window System Integration: %d\n", wsi_support);
+        printf("Graphical operations supported: %d\n", graphics_bit);
+        continue;
+    }
+
+    free(queue_family_properties);
+
+    physical_device_handle = physical_devices[i];
+    break;
+}
+
+    VkDeviceQueueCreateInfo present_queue_info = {
+		.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .queueFamilyIndex = uniqueQueueFamilies[i],
+        .queueCount = 1,
+        .pQueuePriorities = &queuePriorities
+    };
+
+    VkDeviceQueueCreateInfo graphics_queue_info = {
+		.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .queueFamilyIndex = uniqueQueueFamilies[i],
+        .queueCount = 1,
+        .pQueuePriorities = &queuePriorities
+    };
+
+    VkDeviceQueueCreateInfo queue_create_infos[] = {
+        present_queue_info,
+        graphics_queue_info
+    };
+
+    VkDeviceCreateInfo device_info;
+    device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    device_info.pNext = NULL;
+    device_info.flags = 0;
+    device_info.pQueueCreateInfos = queueCreateInfos;
+    if (queueFamilyIndices->graphicsFamily ==
+        queueFamilyIndices->presentFamily)
+    {
+        device_info.queueCreateInfoCount = 1;
+    }
+    else
+    {
+        device_info.queueCreateInfoCount = 2;
+    }
+    device_info.pEnabledFeatures = requiredFeatures;
+    device_info.enabledLayerCount = 0;
+    device_info.ppEnabledLayerNames = NULL;
+    device_info.enabledExtensionCount = deviceExtensionCount;
+    device_info.ppEnabledExtensionNames = (const char* const*)deviceExtensions;*/
+//}
