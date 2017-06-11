@@ -32,12 +32,22 @@ VkSurfaceKHR renderer_get_vk_surface(
 
 VkPhysicalDevice renderer_get_vk_physical_device(
     VkInstance instance,
-    VkSurfaceKHR surface
+    VkSurfaceKHR surface,
+    uint32_t device_extension_count,
+    const char** device_extensions
 );
 bool physical_device_extensions_supported(
     VkPhysicalDevice physical_device,
     uint32_t required_extension_count,
     const char** required_extensions
+);
+
+VkDevice renderer_get_vk_device(
+    VkPhysicalDevice physical_device,
+    VkSurfaceKHR surface,
+    VkPhysicalDeviceFeatures* required_features,
+    uint32_t device_extension_count,
+    const char** device_extensions
 );
 
 #endif

@@ -41,17 +41,45 @@ void renderer_prepare_vk(GLFWwindow* window)
     );
     assert(surface != VK_NULL_HANDLE);
 
+    const char* device_extensions[] = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
+    uint32_t device_extension_count = 1;
+
     VkPhysicalDevice physical_device;
     physical_device = renderer_get_vk_physical_device(
         instance,
-        surface
+        surface,
+        device_extension_count,
+        device_extensions
     );
     assert(physical_device != VK_NULL_HANDLE);
+
+	VkPhysicalDeviceFeatures required_features;
+    memset(&required_features, VK_FALSE, sizeof(required_features));
+    required_features.geometryShader = VK_TRUE;
+    required_features.tessellationShader = VK_TRUE;
+    required_features.fullDrawIndexUint32 = VK_TRUE;
+    required_features.imageCubeArray = VK_TRUE;
+    required_features.sampleRateShading = VK_TRUE;
+    required_features.samplerAnisotropy = VK_TRUE;
+
+    VkDevice device;
+    device = renderer_get_vk_device(
+        physical_device,
+        surface,
+        &required_features,
+        device_extension_count,
+        device_extensions
+    );
+    assert(device != VK_NULL_HANDLE);
 
     printf("Vulkan initialized successfully\n");
 
 
     // Destruction
+    vkDestroyDevice(device, NULL);
+
     vkDestroySurfaceKHR(instance, surface, NULL);
 
     PFN_vkDestroyDebugReportCallbackEXT fp_destroy_debug_callback;
@@ -272,7 +300,9 @@ VkSurfaceKHR renderer_get_vk_surface(
 
 VkPhysicalDevice renderer_get_vk_physical_device(
         VkInstance instance,
-        VkSurfaceKHR surface)
+        VkSurfaceKHR surface,
+        uint32_t device_extension_count,
+        const char** device_extensions)
 {
     VkPhysicalDevice physical_device_handle;
     physical_device_handle = VK_NULL_HANDLE;
@@ -295,17 +325,14 @@ VkPhysicalDevice renderer_get_vk_physical_device(
         physical_devices
     );
 
-    const char* required_extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-    uint32_t required_extension_count = 1;
-
     uint32_t i;
     for (i=0; i<physical_device_count; i++)
     {
         // Ensure required extensions are supported
         if (physical_device_extensions_supported(
                 physical_devices[i],
-                required_extension_count,
-                required_extensions))
+                device_extension_count,
+                device_extensions))
         {
             printf("Extensions not supported\n");
             continue;
@@ -443,8 +470,12 @@ bool physical_device_extensions_supported(
     return true;
 }
 
-/*VkDevice renderer_get_device(
-        VkPhysicalDevice physical_device)
+VkDevice renderer_get_vk_device(
+        VkPhysicalDevice physical_device,
+        VkSurfaceKHR surface,
+        VkPhysicalDeviceFeatures* required_features,
+        uint32_t device_extension_count,
+        const char** device_extensions)
 {
     VkDevice device_handle;
     device_handle = VK_NULL_HANDLE;
@@ -452,7 +483,7 @@ bool physical_device_extensions_supported(
     uint32_t queue_family_count;
     vkGetPhysicalDeviceQueueFamilyProperties(
         physical_device,
-        &queue_family_index_count,
+        &queue_family_count,
         NULL
     );
 
@@ -462,75 +493,76 @@ bool physical_device_extensions_supported(
     );
 
     vkGetPhysicalDeviceQueueFamilyProperties(
-        physical_devices[i],
+        physical_device,
         &queue_family_count,
         queue_family_properties
     );
 
+    int graphics_family_index = -1;
+    int present_family_index = -1;
+
+    VkBool32 wsi_support;
     uint32_t i;
     for (i=0; i<queue_family_count; i++)
     {
         if (queue_family_properties[i].queueCount > 0 &&
             queue_family_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
         {
-            graphics_family_index = q
+            graphics_family_index = i;
         }
 
         VkResult wsi_query_result;
         wsi_query_result = vkGetPhysicalDeviceSurfaceSupportKHR(
-            physical_devices[i],
-            queue_family,
+            physical_device,
+            i,
             surface,
             &wsi_support
         );
         assert(wsi_query_result == VK_SUCCESS);
+        if (wsi_support) {
+            present_family_index = i;
+        }
 
-        if (wsi_support && graphics_bit)
+        if (graphics_family_index >= 0 &&
+            present_family_index >= 0)
+        {
             break;
+        }
     }
-    if (!(wsi_support && graphics_bit)) {
-        printf("Suitable GPU not found:\n");
-        printf("Window System Integration: %d\n", wsi_support);
-        printf("Graphical operations supported: %d\n", graphics_bit);
-        continue;
+    assert(graphics_family_index >= 0);
+    assert(present_family_index >= 0);
+
+    uint32_t device_queue_count = 2;
+    uint32_t device_queue_indices[] = {
+        graphics_family_index,
+        present_family_index
+    };
+    float device_queue_priorities[] = {1.0f, 1.0f};
+    VkDeviceQueueCreateFlags device_queue_flags[] = {0, 0};
+
+    VkDeviceQueueCreateInfo* device_queue_infos;
+    device_queue_infos = malloc(
+        sizeof(*device_queue_infos) * device_queue_count
+    );
+
+    for (i=0; i<device_queue_count; i++) {
+        VkDeviceQueueCreateInfo device_queue_info = {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .pNext = NULL,
+            .flags = device_queue_flags[i],
+            .queueFamilyIndex = device_queue_indices[i],
+            .queueCount = 1,
+            .pQueuePriorities = &device_queue_priorities[i]
+        };
+        device_queue_infos[i] = device_queue_info;
     }
-
-    free(queue_family_properties);
-
-    physical_device_handle = physical_devices[i];
-    break;
-}
-
-    VkDeviceQueueCreateInfo present_queue_info = {
-		.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-        .pNext = NULL,
-        .flags = 0,
-        .queueFamilyIndex = uniqueQueueFamilies[i],
-        .queueCount = 1,
-        .pQueuePriorities = &queuePriorities
-    };
-
-    VkDeviceQueueCreateInfo graphics_queue_info = {
-		.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-        .pNext = NULL,
-        .flags = 0,
-        .queueFamilyIndex = uniqueQueueFamilies[i],
-        .queueCount = 1,
-        .pQueuePriorities = &queuePriorities
-    };
-
-    VkDeviceQueueCreateInfo queue_create_infos[] = {
-        present_queue_info,
-        graphics_queue_info
-    };
 
     VkDeviceCreateInfo device_info;
     device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     device_info.pNext = NULL;
     device_info.flags = 0;
-    device_info.pQueueCreateInfos = queueCreateInfos;
-    if (queueFamilyIndices->graphicsFamily ==
-        queueFamilyIndices->presentFamily)
+    device_info.pQueueCreateInfos = device_queue_infos;
+    if (graphics_family_index == present_family_index)
     {
         device_info.queueCreateInfoCount = 1;
     }
@@ -538,9 +570,21 @@ bool physical_device_extensions_supported(
     {
         device_info.queueCreateInfoCount = 2;
     }
-    device_info.pEnabledFeatures = requiredFeatures;
+    device_info.pEnabledFeatures = required_features;
     device_info.enabledLayerCount = 0;
     device_info.ppEnabledLayerNames = NULL;
-    device_info.enabledExtensionCount = deviceExtensionCount;
-    device_info.ppEnabledExtensionNames = (const char* const*)deviceExtensions;*/
-//}
+    device_info.enabledExtensionCount = device_extension_count;
+    device_info.ppEnabledExtensionNames =
+        (const char* const*)device_extensions;
+
+    VkResult result;
+    result = vkCreateDevice(
+        physical_device,
+        &device_info,
+        NULL,
+        &device_handle
+    );
+    assert(result == VK_SUCCESS);
+
+    return device_handle;
+}
