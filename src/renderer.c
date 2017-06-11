@@ -74,8 +74,13 @@ void renderer_prepare_vk(GLFWwindow* window)
     );
     assert(device != VK_NULL_HANDLE);
 
-    printf("Vulkan initialized successfully\n");
+    VkSurfaceFormatKHR image_format;
+    image_format = renderer_get_vk_image_format(
+        physical_device,
+        surface
+    );
 
+    printf("Vulkan initialized successfully\n");
 
     // Destruction
     vkDestroyDevice(device, NULL);
@@ -588,3 +593,263 @@ VkDevice renderer_get_vk_device(
 
     return device_handle;
 }
+
+VkSurfaceFormatKHR renderer_get_vk_image_format(
+        VkPhysicalDevice physical_device,
+        VkSurfaceKHR surface)
+{
+    VkSurfaceFormatKHR image_format;
+
+    uint32_t format_count;
+    VkSurfaceFormatKHR* formats;
+    VkResult result;
+    result = vkGetPhysicalDeviceSurfaceFormatsKHR(
+        physical_device,
+        surface,
+        &format_count,
+        NULL
+    );
+    assert(result == VK_SUCCESS);
+    formats = malloc(format_count * sizeof(*formats));
+    result = vkGetPhysicalDeviceSurfaceFormatsKHR(
+        physical_device,
+        surface,
+        &format_count,
+        formats
+    );
+    assert(result == VK_SUCCESS);
+
+    // Free to choose any format
+    if (format_count == 1 && formats[0].format == VK_FORMAT_UNDEFINED)
+    {
+        image_format.format = VK_FORMAT_B8G8R8A8_UNORM;
+        image_format.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    }
+    // Limited selection of formats
+    else
+    {
+        uint32_t i;
+        bool ideal_format_found = false;
+        for (i=0; i<format_count; i++)
+        {
+            // Ideal format B8G8R8A8_UNORM, SRGB_NONLINEAR
+            if (formats[i].format == VK_FORMAT_B8G8R8A8_UNORM &&
+                formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            {
+                image_format = formats[i];
+                ideal_format_found = true;
+                break;
+            }
+        }
+
+        if (!ideal_format_found)
+        {
+            image_format = formats[0];
+        }
+    }
+
+    return image_format;
+}
+
+/*void VKIcreateSwapchain(
+        struct VKIswapchainDetails* swapchainDetails,
+        struct VKIqueueFamilyIndices* queueFamilyIndices,
+        VkSurfaceKHR surface,
+        VkDevice device,
+        VkSwapchainKHR* swapchain,
+        uint32_t* swapchainImageCount,
+        struct VKIswapchainBuffer* swapchainBuffers,
+        VkFormat* swapchainImageFormat,
+        VkExtent2D* swapchainExtent)
+{
+    VkSwapchainKHR swapchain_handle;
+    swapchain_handle = VK_NULL_HANDLE;
+
+    // Determine image count (maxImageCount 0 == no limit)
+	VkSurfaceCapabilitiesKHR surface_capabilities;
+    VkResult result;
+    result = vkGetPhysicalDeviceSurfaceCapabilitesKHR(
+        physical_device,
+        surface,
+        &surface_capabilities
+    );
+    assert(result == VK_SUCCESS);
+
+    uint32_t image_count;
+    image_count = surface_capabilities.minImageCount + 1;
+    if (image_count > 0 &&
+        image_count > surface_capabilities.maxImageCount)
+    {
+        image_count = surface_capabilities.maxImageCount;
+    }
+
+
+    // Determine extent (resolution of swapchain images)
+    VkExtent2D extent;
+    extent.width = WIDTH;
+    extent.height = HEIGHT;
+    if (swapchainDetails->capabilities.currentExtent.width == UINT32_MAX)
+    {
+        extent.width = MAX(
+            swapchainDetails->capabilities.minImageExtent.width,
+            MIN(
+                swapchainDetails->capabilities.maxImageExtent.width,
+                extent.width
+            )
+        );
+
+        extent.height = MAX(
+            swapchainDetails->capabilities.minImageExtent.height,
+            MIN(
+                swapchainDetails->capabilities.maxImageExtent.height,
+                extent.height
+            )
+        );
+    }
+    *swapchainExtent = extent;
+
+    // Queue family indices
+    VkSharingMode sharingMode;
+    uint32_t queueFamilyIndexCount;
+    const uint32_t* pQueueFamilyIndices;
+
+    const uint32_t indices[2] = {
+        (uint32_t)queueFamilyIndices->graphicsFamily,
+        (uint32_t)queueFamilyIndices->presentFamily
+    };
+
+    if (queueFamilyIndices->graphicsFamily !=
+        queueFamilyIndices->presentFamily)
+    {
+        sharingMode = VK_SHARING_MODE_CONCURRENT;
+        queueFamilyIndexCount = 2;
+        pQueueFamilyIndices = indices;
+    }
+    else
+    {
+        sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        queueFamilyIndexCount = 0;
+        pQueueFamilyIndices = NULL;
+    }
+
+    // Find a present mode, ideally MAILBOX unless unavailable,
+    // in which case fall back to FIFO (always available)
+    VkPresentModeKHR presentMode;
+    uint32_t i;
+    bool idealPresentModeFound = false;
+    for (i=0; i<swapchainDetails->presentModeCount; i++)
+    {
+        if (swapchainDetails->presentModes[i] ==
+                VK_PRESENT_MODE_MAILBOX_KHR)
+        {
+            presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+            idealPresentModeFound = true;
+        }
+    }
+
+    if (!idealPresentModeFound)
+    {
+        presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    // Old swapchain
+    VkSwapchainKHR oldSwapchain = *swapchain;
+
+    VkSwapchainCreateInfoKHR swapchainInfo;
+    swapchainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapchainInfo.pNext = NULL;
+    swapchainInfo.flags = 0;
+    swapchainInfo.surface = surface;
+    swapchainInfo.minImageCount = imageCount;
+    swapchainInfo.imageFormat = surfaceFormat.format;
+    swapchainInfo.imageColorSpace = surfaceFormat.colorSpace;
+    swapchainInfo.imageExtent = extent;
+    swapchainInfo.imageArrayLayers = 1;
+    swapchainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchainInfo.imageSharingMode = sharingMode;
+    swapchainInfo.queueFamilyIndexCount = queueFamilyIndexCount;
+    swapchainInfo.pQueueFamilyIndices = pQueueFamilyIndices;
+    swapchainInfo.preTransform =
+        swapchainDetails->capabilities.currentTransform;
+    swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapchainInfo.presentMode = presentMode;
+    swapchainInfo.clipped = VK_TRUE;
+    swapchainInfo.oldSwapchain = oldSwapchain;
+
+    VkSwapchainKHR newSwapchain;
+    VkResult result;
+    result = vkCreateSwapchainKHR(
+                device,
+                &swapchainInfo,
+                NULL,
+                &newSwapchain
+            );
+    assert(result == VK_SUCCESS);
+
+    *swapchain = newSwapchain;
+
+    if (oldSwapchain != VK_NULL_HANDLE)
+    {
+        vkDestroySwapchainKHR(
+            device,
+            oldSwapchain,
+            NULL
+        );
+    }
+
+    vkGetSwapchainImagesKHR(
+        device,
+        *swapchain,
+        swapchainImageCount,
+        NULL
+    );
+    VkImage* images;
+    images = malloc((*swapchainImageCount) * sizeof(*images));
+    assert(images);
+    vkGetSwapchainImagesKHR(
+        device,
+        *swapchain,
+        swapchainImageCount,
+        images
+    );
+
+    // Images + views
+    assert(!swapchainBuffers);
+    swapchainBuffers = malloc(
+        (*swapchainImageCount) * sizeof(*swapchainBuffers)
+    );
+    assert(swapchainBuffers);
+
+    for (i=0; i<(*swapchainImageCount); i++)
+    {
+        swapchainBuffers[i].image = images[i];
+
+        VkImageViewCreateInfo viewInfo;
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.pNext = NULL;
+        viewInfo.flags = 0;
+        viewInfo.image = swapchainBuffers[i].image;
+        viewInfo.viewType = VK_IMAGE_TYPE_2D;
+        viewInfo.format = *swapchainImageFormat;
+        viewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        viewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        viewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        viewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+
+        VkResult result;
+        result = vkCreateImageView(
+                    device,
+                    &viewInfo,
+                    NULL,
+                    &swapchainBuffers[i].imageView
+                );
+        assert(result == VK_SUCCESS);
+    }
+
+    free(images);
+}*/

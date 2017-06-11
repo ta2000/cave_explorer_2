@@ -50,4 +50,9 @@ VkDevice renderer_get_vk_device(
     const char** device_extensions
 );
 
+VkSurfaceFormatKHR renderer_get_vk_image_format(
+    VkPhysicalDevice physical_device,
+    VkSurfaceKHR surface
+);
+
 #endif
