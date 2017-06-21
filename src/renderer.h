@@ -6,6 +6,16 @@
 
 #include <stdbool.h>
 
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
+struct swapchain_buffer
+{
+    VkImage image;
+    VkImageView image_view;
+    VkCommandBuffer cmd_buffer;
+};
+
 void renderer_prepare_vk(GLFWwindow* window);
 
 VkInstance renderer_get_vk_instance();
@@ -42,6 +52,15 @@ bool physical_device_extensions_supported(
     const char** required_extensions
 );
 
+uint32_t renderer_get_graphics_queue(
+    VkPhysicalDevice physical_device
+);
+
+uint32_t renderer_get_present_queue(
+    VkPhysicalDevice physical_device,
+    VkSurfaceKHR surface
+);
+
 VkDevice renderer_get_vk_device(
     VkPhysicalDevice physical_device,
     VkSurfaceKHR surface,
@@ -53,6 +72,30 @@ VkDevice renderer_get_vk_device(
 VkSurfaceFormatKHR renderer_get_vk_image_format(
     VkPhysicalDevice physical_device,
     VkSurfaceKHR surface
+);
+
+VkExtent2D renderer_get_vk_image_extent(
+    VkPhysicalDevice physical_device,
+    VkSurfaceKHR surface,
+    uint32_t window_width,
+    uint32_t window_height
+);
+
+VkSwapchainKHR renderer_get_vk_swapchain(
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    VkSurfaceKHR surface,
+    VkSurfaceFormatKHR image_format,
+    VkExtent2D image_extent,
+    VkSwapchainKHR old_swapchain
+);
+
+void renderer_create_swapchain_buffers(
+    VkDevice device,
+    VkSwapchainKHR swapchain,
+    VkSurfaceFormatKHR image_format,
+    struct swapchain_buffer** swapchain_buffers,
+    uint32_t* swapchain_buffer_count
 );
 
 #endif
