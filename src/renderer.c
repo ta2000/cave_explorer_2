@@ -109,9 +109,26 @@ void renderer_prepare_vk(GLFWwindow* window)
         &image_count
     );
 
+    VkCommandPool command_pool;
+    command_pool = renderer_get_vk_command_pool(
+        physical_device,
+        device
+    );
+    assert(command_pool != VK_NULL_HANDLE);
+
+    VkFormat depth_format;
+    depth_format = renderer_get_vk_depth_format(
+        physical_device,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+    );
+    assert(depth_format != VK_FORMAT_UNDEFINED);
+
     printf("Vulkan initialized successfully\n");
 
     // Destruction
+    vkDestroyCommandPool(device, command_pool, NULL);
+
     uint32_t i;
     for (i=0; i<image_count; i++) {
         vkDestroyImageView(
@@ -987,4 +1004,71 @@ void renderer_create_swapchain_buffers(
     }
 
     free(images);
+}
+
+VkCommandPool renderer_get_vk_command_pool(
+        VkPhysicalDevice physical_device,
+        VkDevice device)
+{
+    VkCommandPool command_pool_handle;
+    command_pool_handle = VK_NULL_HANDLE;
+
+    uint32_t graphics_family_index = renderer_get_graphics_queue(
+        physical_device
+    );
+
+    VkCommandPoolCreateInfo command_pool_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .queueFamilyIndex = graphics_family_index
+    };
+
+    VkResult result;
+    result = vkCreateCommandPool(
+        device,
+        &command_pool_info,
+        NULL,
+        &command_pool_handle
+    );
+    assert(result == VK_SUCCESS);
+
+    return command_pool_handle;
+}
+
+VkFormat renderer_get_vk_depth_format(
+        VkPhysicalDevice physicalDevice,
+        VkImageTiling tiling,
+        VkFormatFeatureFlags features)
+{
+    VkFormat format = VK_FORMAT_UNDEFINED;
+
+	VkFormat formats[] = {
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_D24_UNORM_S8_UINT
+    };
+    uint32_t format_count = sizeof(formats)/sizeof(formats[0]);
+
+    uint32_t i;
+    for (i=0; i<format_count; i++)
+    {
+        VkFormatProperties properties;
+        vkGetPhysicalDeviceFormatProperties(
+            physicalDevice,
+            formats[i],
+            &properties
+        );
+
+        if ( (tiling == VK_IMAGE_TILING_LINEAR &&
+             (properties.linearTilingFeatures & features) == features)
+                ||
+             (tiling == VK_IMAGE_TILING_OPTIMAL &&
+             (properties.optimalTilingFeatures & features) == features) )
+        {
+            format = formats[i];
+        }
+    }
+
+    return format;
 }

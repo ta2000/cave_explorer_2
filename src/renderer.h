@@ -98,4 +98,15 @@ void renderer_create_swapchain_buffers(
     uint32_t* swapchain_buffer_count
 );
 
+VkCommandPool renderer_get_vk_command_pool(
+    VkPhysicalDevice physical_device,
+    VkDevice device
+);
+
+VkFormat renderer_get_vk_depth_format(
+    VkPhysicalDevice physical_device,
+    VkImageTiling tiling,
+    VkFormatFeatureFlags features
+);
+
 #endif
