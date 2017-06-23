@@ -124,9 +124,22 @@ void renderer_prepare_vk(GLFWwindow* window)
     );
     assert(depth_format != VK_FORMAT_UNDEFINED);
 
+    struct image depth_image;
+    depth_image = renderer_get_depth_image(
+        physical_device,
+        device,
+        command_pool,
+        image_extent,
+        depth_format
+    );
+
     printf("Vulkan initialized successfully\n");
 
     // Destruction
+    vkDestroyImage(device, depth_image.image, NULL);
+    vkDestroyImageView(device, depth_image.image_view, NULL);
+    vkFreeMemory(device, depth_image.memory, NULL);
+
     vkDestroyCommandPool(device, command_pool, NULL);
 
     uint32_t i;
@@ -1036,6 +1049,122 @@ VkCommandPool renderer_get_vk_command_pool(
     return command_pool_handle;
 }
 
+void renderer_change_image_layout(
+        VkDevice device,
+        VkCommandPool command_pool,
+        VkImage image,
+        VkImageLayout old_layout,
+        VkImageLayout new_layout,
+        VkAccessFlagBits src_access_mask,
+        VkImageAspectFlags aspect_mask)
+{
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo cmd_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = NULL,
+        .commandPool = command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+
+    VkResult result;
+    result = vkAllocateCommandBuffers(
+        device,
+        &cmd_alloc_info,
+        &cmd
+    );
+    assert(result == VK_SUCCESS);
+
+    VkCommandBufferBeginInfo cmd_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .pInheritanceInfo = NULL
+    };
+
+    result = vkBeginCommandBuffer(
+        cmd,
+        &cmd_begin_info
+    );
+    assert(result == VK_SUCCESS);
+
+    VkImageMemoryBarrier memory_barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = NULL,
+        .srcAccessMask = src_access_mask,
+        .dstAccessMask = 0,
+        .oldLayout = old_layout,
+        .newLayout = new_layout,
+        .image = image,
+        .subresourceRange = {
+            aspect_mask,
+            0,
+            1,
+            0,
+            1
+        }
+    };
+
+    if (new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        memory_barrier.dstAccessMask =
+            VK_ACCESS_TRANSFER_READ_BIT;
+    }
+
+    if (new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        memory_barrier.dstAccessMask =
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    }
+
+    if (new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+        memory_barrier.dstAccessMask =
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    }
+
+    if (new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        memory_barrier.dstAccessMask =
+            VK_ACCESS_SHADER_READ_BIT |
+            VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+    }
+
+    vkCmdPipelineBarrier(
+        cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        0,
+        0,
+        NULL,
+        0,
+        NULL,
+        1,
+        &memory_barrier
+    );
+}
+
+uint32_t renderer_find_memory_type(
+        uint32_t memory_type_bits,
+        VkMemoryPropertyFlags properties,
+        uint32_t memory_type_count,
+        VkMemoryType* memory_types)
+{
+    uint32_t memory_type;
+
+    uint32_t i;
+    bool memory_type_found = false;
+    for (i=0; i<memory_type_count; ++i)
+    {
+        if ((memory_type_bits & (1 << i)) &&
+            ((memory_types[i].propertyFlags & properties) == properties))
+        {
+            memory_type = i;
+            memory_type_found = true;
+        }
+    }
+
+    assert(memory_type_found);
+
+    return memory_type;
+}
+
 VkFormat renderer_get_vk_depth_format(
         VkPhysicalDevice physicalDevice,
         VkImageTiling tiling,
@@ -1067,8 +1196,117 @@ VkFormat renderer_get_vk_depth_format(
              (properties.optimalTilingFeatures & features) == features) )
         {
             format = formats[i];
+            break;
         }
     }
 
     return format;
+}
+
+struct image renderer_get_depth_image(
+        VkPhysicalDevice physical_device,
+        VkDevice device,
+        VkCommandPool command_pool,
+        VkExtent2D extent,
+        VkFormat depth_format)
+{
+    struct image depth_image;
+
+    VkImageCreateInfo image_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = depth_format,
+        .extent.width = extent.width,
+        .extent.height = extent.height,
+        .extent.depth = 1,
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices = NULL,
+        .initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED
+    };
+
+    VkResult result;
+    result = vkCreateImage(
+        device,
+        &image_info,
+        NULL,
+        &depth_image.image
+    );
+    assert(result == VK_SUCCESS);
+
+    VkMemoryRequirements mem_reqs;
+    vkGetImageMemoryRequirements(device, depth_image.image, &mem_reqs);
+
+    VkPhysicalDeviceMemoryProperties mem_props;
+    vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_props);
+
+    uint32_t mem_type;
+    mem_type = renderer_find_memory_type(
+        mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        mem_props.memoryTypeCount,
+        mem_props.memoryTypes
+    );
+
+    VkMemoryAllocateInfo mem_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = NULL,
+        .allocationSize = mem_reqs.size,
+        .memoryTypeIndex = mem_type
+    };
+
+    result = vkAllocateMemory(
+        device, &mem_alloc_info, NULL, &depth_image.memory);
+    assert(result == VK_SUCCESS);
+
+    result = vkBindImageMemory(
+        device, depth_image.image, depth_image.memory, 0);
+    assert(result == VK_SUCCESS);
+
+    renderer_change_image_layout(
+        device,
+        command_pool,
+        depth_image.image,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        0,
+        VK_IMAGE_ASPECT_DEPTH_BIT
+    );
+
+    VkImageViewCreateInfo image_view_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .image = depth_image.image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = depth_format,
+        .components.r = VK_COMPONENT_SWIZZLE_IDENTITY,
+        .components.g = VK_COMPONENT_SWIZZLE_IDENTITY,
+        .components.b = VK_COMPONENT_SWIZZLE_IDENTITY,
+        .components.a = VK_COMPONENT_SWIZZLE_IDENTITY,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        }
+    };
+
+    result = vkCreateImageView(
+        device,
+        &image_view_info,
+        NULL,
+        &depth_image.image_view
+    );
+    assert(result == VK_SUCCESS);
+
+    return depth_image;
 }

@@ -9,6 +9,18 @@
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
+struct vertex
+{
+    float x,y,z;
+};
+
+struct image
+{
+    VkImage image;
+    VkImageView image_view;
+    VkDeviceMemory memory;
+};
+
 struct swapchain_buffer
 {
     VkImage image;
@@ -103,10 +115,35 @@ VkCommandPool renderer_get_vk_command_pool(
     VkDevice device
 );
 
+void renderer_change_image_layout(
+    VkDevice device,
+    VkCommandPool command_pool,
+    VkImage image,
+    VkImageLayout old_layout,
+    VkImageLayout new_layout,
+    VkAccessFlagBits src_access_mask,
+    VkImageAspectFlags aspect_mask
+);
+
+uint32_t renderer_find_memory_type(
+    uint32_t memory_type_bits,
+    VkMemoryPropertyFlags properties,
+    uint32_t memory_type_count,
+    VkMemoryType* memoryTypes
+);
+
 VkFormat renderer_get_vk_depth_format(
     VkPhysicalDevice physical_device,
     VkImageTiling tiling,
     VkFormatFeatureFlags features
+);
+
+struct image renderer_get_depth_image(
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    VkCommandPool command_pool,
+    VkExtent2D extent,
+    VkFormat depth_format
 );
 
 #endif
