@@ -146,4 +146,10 @@ struct image renderer_get_depth_image(
     VkFormat depth_format
 );
 
+VkRenderPass renderer_get_vk_render_pass(
+    VkDevice device,
+    VkFormat image_format,
+    VkFormat depth_format
+);
+
 #endif
