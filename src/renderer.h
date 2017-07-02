@@ -4,6 +4,8 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "stb_image.h"
+
 #include <stdbool.h>
 
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -14,11 +16,16 @@ struct vertex
     float x,y,z;
 };
 
-struct image
+struct texture_image
 {
     VkImage image;
     VkImageView image_view;
     VkDeviceMemory memory;
+    VkDeviceSize size;
+    VkSampler sampler;
+    uint32_t width;
+    uint32_t height;
+    void* mapped;
 };
 
 struct swapchain_buffer
@@ -138,7 +145,7 @@ VkFormat renderer_get_vk_depth_format(
     VkFormatFeatureFlags features
 );
 
-struct image renderer_get_depth_image(
+struct texture_image renderer_get_depth_image(
     VkPhysicalDevice physical_device,
     VkDevice device,
     VkCommandPool command_pool,
@@ -150,6 +157,43 @@ VkRenderPass renderer_get_vk_render_pass(
     VkDevice device,
     VkFormat image_format,
     VkFormat depth_format
+);
+
+void renderer_create_framebuffers(
+    VkDevice device,
+    VkRenderPass render_pass,
+    VkExtent2D swapchain_extent,
+    struct swapchain_buffer* swapchain_buffers,
+    VkImageView depth_image_view,
+    VkFramebuffer* framebuffers,
+    uint32_t swapchain_image_count
+);
+
+void renderer_create_image(
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    stbi_uc* pixels,
+    struct texture_image* tex_image,
+    VkFormat format,
+    VkImageTiling tiling,
+    VkImageUsageFlags usage,
+    VkMemoryPropertyFlags memory_flags
+);
+
+struct texture_image renderer_load_image(
+    const char* src,
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    VkCommandPool command_pool
+);
+
+
+VkDescriptorPool renderer_get_descriptor_pool(
+    VkDevice device
+);
+
+VkDescriptorSetLayout renderer_get_descriptor_layout(
+    VkDevice device
 );
 
 #endif

@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
 #include <string.h>
 #include <assert.h>
 
@@ -124,7 +123,7 @@ void renderer_prepare_vk(GLFWwindow* window)
     );
     assert(depth_format != VK_FORMAT_UNDEFINED);
 
-    struct image depth_image;
+    struct texture_image depth_image;
     depth_image = renderer_get_depth_image(
         physical_device,
         device,
@@ -141,9 +140,35 @@ void renderer_prepare_vk(GLFWwindow* window)
     );
     assert(render_pass != VK_NULL_HANDLE);
 
+    VkFramebuffer* framebuffers = NULL;
+    framebuffers = malloc(image_count * sizeof(*framebuffers));
+    assert(framebuffers);
+    renderer_create_framebuffers(
+        device,
+        render_pass,
+        image_extent,
+        swapchain_buffers,
+        depth_image.image_view,
+        framebuffers,
+        image_count
+    );
+
+    VkDescriptorPool descriptor_pool;
+    descriptor_pool = renderer_get_descriptor_pool(device);
+    assert(descriptor_pool != VK_NULL_HANDLE);
+
+    VkDescriptorSetLayout descriptor_layout;
+    descriptor_layout = renderer_get_descriptor_layout(device);
+    assert(descriptor_layout != VK_NULL_HANDLE);
+
     printf("Vulkan initialized successfully\n");
 
     // Destruction
+    uint32_t i;
+    for (i=0; i<image_count; i++) {
+        vkDestroyFramebuffer(device, framebuffers[i], NULL);
+    }
+
     vkDestroyRenderPass(device, render_pass, NULL);
 
     vkDestroyImage(device, depth_image.image, NULL);
@@ -152,7 +177,6 @@ void renderer_prepare_vk(GLFWwindow* window)
 
     vkDestroyCommandPool(device, command_pool, NULL);
 
-    uint32_t i;
     for (i=0; i<image_count; i++) {
         vkDestroyImageView(
             device,
@@ -1213,14 +1237,14 @@ VkFormat renderer_get_vk_depth_format(
     return format;
 }
 
-struct image renderer_get_depth_image(
+struct texture_image renderer_get_depth_image(
         VkPhysicalDevice physical_device,
         VkDevice device,
         VkCommandPool command_pool,
         VkExtent2D extent,
         VkFormat depth_format)
 {
-    struct image depth_image;
+    struct texture_image depth_image;
 
     VkImageCreateInfo image_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -1411,3 +1435,456 @@ VkRenderPass renderer_get_vk_render_pass(
 
     return render_pass_handle;
 }
+
+void renderer_create_framebuffers(
+        VkDevice device,
+        VkRenderPass render_pass,
+        VkExtent2D swapchain_extent,
+        struct swapchain_buffer* swapchain_buffers,
+        VkImageView depth_image_view,
+        VkFramebuffer* framebuffers,
+        uint32_t swapchain_image_count)
+{
+    VkImageView attachments[2];
+    attachments[1] = depth_image_view;
+
+    VkFramebufferCreateInfo framebuffer_info = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .renderPass = render_pass,
+        .attachmentCount = 2,
+        .pAttachments = attachments,
+        .width = swapchain_extent.width,
+        .height = swapchain_extent.height,
+        .layers = 1
+    };
+
+    uint32_t i;
+	for (i=0; i<swapchain_image_count; i++)
+    {
+        attachments[0] = swapchain_buffers[i].image_view;
+
+        VkResult result;
+        result = vkCreateFramebuffer(
+            device,
+            &framebuffer_info,
+            NULL,
+            &framebuffers[i]
+        );
+        assert(result == VK_SUCCESS);
+	}
+}
+
+void renderer_create_image(
+        VkPhysicalDevice physical_device,
+        VkDevice device,
+        stbi_uc* pixels,
+        struct texture_image* tex_image,
+        VkFormat format,
+        VkImageTiling tiling,
+        VkImageUsageFlags usage,
+        VkMemoryPropertyFlags memory_flags)
+{
+    VkImageCreateInfo image_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = {tex_image->width, tex_image->height, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = tiling,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices = NULL,
+        .initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED
+    };
+
+    VkResult result;
+    result = vkCreateImage(device, &image_info, NULL, &tex_image->image);
+    assert(result == VK_SUCCESS);
+
+    VkMemoryRequirements mem_reqs;
+    vkGetImageMemoryRequirements(device, tex_image->image, &mem_reqs);
+
+    VkPhysicalDeviceMemoryProperties mem_props;
+    vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_props);
+
+	VkMemoryAllocateInfo alloc_info = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.pNext = NULL,
+		.allocationSize = mem_reqs.size,
+		.memoryTypeIndex = renderer_find_memory_type(
+			mem_reqs.memoryTypeBits,
+			memory_flags,
+			mem_props.memoryTypeCount,
+			mem_props.memoryTypes
+		)
+	};
+
+    result = vkAllocateMemory(device, &alloc_info, NULL, &tex_image->memory);
+    assert(result == VK_SUCCESS);
+
+    vkBindImageMemory(device, tex_image->image, tex_image->memory, 0);
+
+    stbi_image_free(pixels);
+}
+
+struct texture_image renderer_load_texture(
+    const char* src,
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    VkCommandPool command_pool)
+{
+    struct texture_image tex_image;
+
+    stbi_uc* pixels = NULL;
+    int tex_width, tex_height, tex_channels;
+    pixels = stbi_load(
+        src,
+        &tex_width,
+        &tex_height,
+        &tex_channels,
+        STBI_rgb_alpha
+    );
+    assert(pixels && tex_width && tex_height);
+
+    tex_image.width = tex_width;
+    tex_image.height = tex_height;
+    tex_image.size = tex_width * tex_height * 4;
+
+    struct texture_image staging_image;
+    staging_image.width = tex_width;
+    staging_image.height = tex_height;
+    staging_image.size = tex_width * tex_height * 4;
+
+    renderer_create_image(
+        physical_device,
+        device,
+        pixels,
+        &staging_image,
+        VK_FORMAT_R8G8B8A8_UNORM,
+        VK_IMAGE_TILING_LINEAR,
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    VkResult result;
+    result = vkMapMemory(
+        device,
+        staging_image.memory,
+        0,
+        tex_image.size,
+        0,
+        tex_image.mapped
+    );
+    assert(result == VK_SUCCESS);
+    memcpy(tex_image.mapped, pixels, (size_t)tex_image.size);
+    vkUnmapMemory(device, staging_image.memory);
+
+    renderer_create_image(
+        physical_device,
+        device,
+        pixels,
+        &staging_image,
+        VK_FORMAT_R8G8B8A8_UNORM,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+
+    renderer_change_image_layout(
+        device,
+        command_pool,
+        staging_image.image,
+        VK_IMAGE_LAYOUT_PREINITIALIZED,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        0,
+        VK_IMAGE_ASPECT_COLOR_BIT
+    );
+
+    renderer_change_image_layout(
+        device,
+        command_pool,
+        tex_image.image,
+        VK_IMAGE_LAYOUT_PREINITIALIZED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        0,
+        VK_IMAGE_ASPECT_COLOR_BIT
+    );
+
+    VkCommandBuffer copy_cmd;
+    VkCommandBufferAllocateInfo cmd_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = NULL,
+        .commandPool = command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    result = vkAllocateCommandBuffers(device, &cmd_alloc_info, &copy_cmd);
+    assert(result == VK_SUCCESS);
+
+    VkCommandBufferBeginInfo cmd_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = NULL,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = NULL
+    };
+    result = vkBeginCommandBuffer(copy_cmd, &cmd_begin_info);
+    assert(result == VK_SUCCESS);
+
+	VkImageCopy image_copy = {
+        .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .srcOffset = {0, 0, 0},
+        .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .dstOffset = {0, 0, 0},
+        .extent = {tex_width, tex_height, 1}
+    };
+    vkCmdCopyImage(
+        copy_cmd,
+        staging_image.image,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        tex_image.image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &image_copy
+    );
+
+    renderer_change_image_layout(
+        device,
+        command_pool,
+        tex_image.image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        0,
+        VK_IMAGE_ASPECT_COLOR_BIT
+    );
+
+    vkDestroyImage(device, staging_image.image, NULL);
+    vkFreeMemory(device, staging_image.memory, NULL);
+
+    VkImageViewCreateInfo image_view_info = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.image = tex_image.image,
+		.viewType = VK_IMAGE_VIEW_TYPE_2D,
+		.format = VK_FORMAT_R8G8B8A8_UNORM,
+		.components = {
+			.r = VK_COMPONENT_SWIZZLE_IDENTITY,
+			.g = VK_COMPONENT_SWIZZLE_IDENTITY,
+			.b = VK_COMPONENT_SWIZZLE_IDENTITY,
+			.a = VK_COMPONENT_SWIZZLE_IDENTITY
+		},
+		.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+		.subresourceRange.baseMipLevel = 0,
+		.subresourceRange.levelCount = 1,
+		.subresourceRange.baseArrayLayer = 0,
+		.subresourceRange.layerCount = 1
+    };
+    result = vkCreateImageView(
+        device,
+        &image_view_info,
+        NULL,
+        &tex_image.image_view
+    );
+    assert(result == VK_SUCCESS);
+
+	VkSamplerCreateInfo sampler_info = {
+		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.magFilter = VK_FILTER_LINEAR,
+		.minFilter = VK_FILTER_LINEAR,
+		.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+		.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.mipLodBias =0.0f,
+		.anisotropyEnable = VK_TRUE,
+		.maxAnisotropy = 16,
+		.compareEnable = VK_FALSE,
+		.compareOp = VK_COMPARE_OP_ALWAYS,
+		.minLod = 0.0f,
+		.maxLod = 0.0f,
+		.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+		.unnormalizedCoordinates = VK_FALSE
+    };
+    result = vkCreateSampler(
+        device,
+        &sampler_info,
+        NULL,
+        &tex_image.sampler
+    );
+    assert(result == VK_SUCCESS);
+
+    return tex_image;
+}
+
+VkDescriptorPool renderer_get_descriptor_pool(
+        VkDevice device)
+{
+    VkDescriptorPool descriptor_pool_handle;
+    descriptor_pool_handle = VK_NULL_HANDLE;
+
+    VkDescriptorPoolSize ubo_pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1
+    };
+
+    VkDescriptorPoolSize sampler_pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1
+    };
+
+    VkDescriptorPoolSize pool_sizes[] = {
+        ubo_pool_size,
+        sampler_pool_size
+    };
+
+    VkDescriptorPoolCreateInfo descriptor_pool_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .maxSets = 1,
+        .poolSizeCount = sizeof(pool_sizes)/sizeof(pool_sizes[0]),
+        .pPoolSizes = pool_sizes
+    };
+
+    VkResult result;
+    result = vkCreateDescriptorPool(
+        device,
+        &descriptor_pool_info,
+        NULL,
+        &descriptor_pool_handle
+    );
+    assert(result == VK_SUCCESS);
+
+    return descriptor_pool_handle;
+}
+
+VkDescriptorSetLayout renderer_get_descriptor_layout(
+        VkDevice device)
+{
+    VkDescriptorSetLayout descriptor_layout_handle;
+    descriptor_layout_handle = VK_NULL_HANDLE;
+
+    VkDescriptorSetLayoutBinding uboLayoutBinding = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .pImmutableSamplers = NULL
+    };
+
+    VkDescriptorSetLayoutBinding samplerLayoutBinding = {
+        .binding = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .pImmutableSamplers = NULL
+    };
+
+    VkDescriptorSetLayoutBinding layoutBindings[2] = {
+        uboLayoutBinding,
+        samplerLayoutBinding
+    };
+
+    VkDescriptorSetLayoutCreateInfo descriptor_layout_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .bindingCount = 2,
+        .pBindings = layoutBindings
+    };
+
+    VkResult result;
+    result = vkCreateDescriptorSetLayout(
+        device,
+        &descriptor_layout_info,
+        NULL,
+        &descriptor_layout_handle
+    );
+    assert(result == VK_SUCCESS);
+
+	return descriptor_layout_handle;
+}
+
+/*VkDescriptorSet renderer_get_descriptor_set(
+        VkDevice device,
+        VkDescriptorPool descriptor_pool,
+        VkDescriptorSetLayout* descriptor_layouts
+        uint32_t descriptor_count,
+        VkBuffer uniform_buffer,
+        Vk
+        )
+{
+    VkDescriptorSet descriptor_set_handle;
+    descriptor_set_handle = VK_NULL_HANDLE;
+
+    VkDescriptorSetAllocateInfo descriptor_set_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = NULL,
+        .descriptorPool = descriptor_pool,
+        .descriptorSetCount = descriptor_count,
+        .pSetLayouts = descriptor_layouts
+    };
+
+    VkResult result;
+    result = vkAllocateDescriptorSets(
+        device,
+        &descriptor_set_info,
+        &descriptor_set_handle
+    );
+    assert(result == VK_SUCCESS);
+
+	VkDescriptorBufferInfo buffer_info;
+    bufferInfo.buffer = uniform_buffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range = sizeof(struct UniformBufferObject);
+
+	VkDescriptorImageInfo imageInfo;
+    imageInfo.sampler = engine->textureSampler;
+    imageInfo.imageView = engine->textureImageView;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet ubo_descriptor_write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext = NULL,
+        .dstSet = engine->descriptorSet,
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .pImageInfo = NULL,
+        .pBufferInfo = &bufferInfo,
+        .pTexelBufferView = NULL
+    };
+
+    VkWriteDescriptorSet sampler_descriptor_write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext = NULL,
+        .dstSet = engine->descriptorSet,
+        .dstBinding = 1,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &imageInfo,
+        .pBufferInfo = NULL,
+        .pTexelBufferView = NULL
+    };
+
+	VkWriteDescriptorSet descriptor_writes[] = {
+        ubo_descriptor_write,
+        sampler_descriptor_write
+    };
+
+    vkUpdateDescriptorSets(device, 2, descriptor_writes, 0, NULL);
+
+    return descriptor_set_handle;
+}*/

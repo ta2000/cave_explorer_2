@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <assert.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+
 #include "renderer.h"
 #include "game.h"
 
