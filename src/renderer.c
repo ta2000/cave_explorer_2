@@ -153,6 +153,14 @@ void renderer_prepare_vk(GLFWwindow* window)
         image_count
     );
 
+    /*struct texture_image my_texture;
+    my_texture = renderer_load_texture(
+        "../assets/test.png",
+        physical_device,
+        device,
+        command_pool
+    );*/
+
     VkDescriptorPool descriptor_pool;
     descriptor_pool = renderer_get_descriptor_pool(device);
     assert(descriptor_pool != VK_NULL_HANDLE);
@@ -165,6 +173,15 @@ void renderer_prepare_vk(GLFWwindow* window)
 
     // Destruction
     uint32_t i;
+
+    vkDestroyDescriptorSetLayout(device, descriptor_layout, NULL);
+    vkDestroyDescriptorPool(device, descriptor_pool, NULL);
+
+    /*vkDestroyImage(device, my_texture.image, NULL);
+    vkDestroyImageView(device, my_texture.image_view, NULL);
+    vkFreeMemory(device, my_texture.memory, NULL);
+    vkDestroySampler(device, my_texture.sampler, NULL);*/
+
     for (i=0; i<image_count; i++) {
         vkDestroyFramebuffer(device, framebuffers[i], NULL);
     }
@@ -1724,6 +1741,64 @@ struct texture_image renderer_load_texture(
     assert(result == VK_SUCCESS);
 
     return tex_image;
+}
+
+struct buffer renderer_get_uniform_buffer(
+        VkPhysicalDevice physical_device,
+        VkDevice device)
+{
+    struct buffer uniform_buffer;
+
+	uniform_buffer.size = sizeof(float) * 16 * 3; // 3 mat4
+
+    VkBufferCreateInfo buffer_info = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.size = uniform_buffer.size,
+		.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL
+    };
+    vkCreateBuffer(device, &buffer_info, NULL, &uniform_buffer.buffer);
+
+    VkMemoryRequirements mem_reqs;
+    vkGetBufferMemoryRequirements(device, uniform_buffer.buffer, &mem_reqs);
+
+    VkPhysicalDeviceMemoryProperties mem_props;
+    vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_props);
+
+	VkMemoryAllocateInfo alloc_info = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.pNext = NULL,
+		.allocationSize = mem_reqs.size,
+		.memoryTypeIndex = renderer_find_memory_type(
+			mem_reqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			mem_props.memoryTypeCount,
+			mem_props.memoryTypes
+		)
+	};
+
+    VkResult result;
+    result = vkAllocateMemory(
+        device,
+        &alloc_info,
+        NULL,
+        &uniform_buffer.memory
+    );
+    assert(result == VK_SUCCESS);
+
+    vkBindBufferMemory(
+        device,
+        uniform_buffer.buffer,
+        uniform_buffer.memory,
+        0
+    );
+
+    return uniform_buffer;
 }
 
 VkDescriptorPool renderer_get_descriptor_pool(

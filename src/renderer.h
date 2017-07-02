@@ -28,6 +28,13 @@ struct texture_image
     void* mapped;
 };
 
+struct buffer
+{
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+    VkDeviceSize size;
+};
+
 struct swapchain_buffer
 {
     VkImage image;
@@ -180,13 +187,17 @@ void renderer_create_image(
     VkMemoryPropertyFlags memory_flags
 );
 
-struct texture_image renderer_load_image(
+struct texture_image renderer_load_texture(
     const char* src,
     VkPhysicalDevice physical_device,
     VkDevice device,
     VkCommandPool command_pool
 );
 
+struct buffer renderer_get_uniform_buffer(
+    VkPhysicalDevice physical_device,
+    VkDevice device
+);
 
 VkDescriptorPool renderer_get_descriptor_pool(
     VkDevice device
