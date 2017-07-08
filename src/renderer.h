@@ -16,7 +16,7 @@ struct vertex
     float x,y,z;
 };
 
-struct texture_image
+struct renderer_image
 {
     VkImage image;
     VkImageView image_view;
@@ -28,7 +28,7 @@ struct texture_image
     void* mapped;
 };
 
-struct buffer
+struct renderer_buffer
 {
     VkBuffer buffer;
     VkDeviceMemory memory;
@@ -129,7 +129,14 @@ VkCommandPool renderer_get_vk_command_pool(
     VkDevice device
 );
 
+void renderer_submit_command_buffer(
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    VkCommandBuffer* cmd
+);
+
 void renderer_change_image_layout(
+    VkPhysicalDevice physical_device,
     VkDevice device,
     VkCommandPool command_pool,
     VkImage image,
@@ -152,7 +159,7 @@ VkFormat renderer_get_vk_depth_format(
     VkFormatFeatureFlags features
 );
 
-struct texture_image renderer_get_depth_image(
+struct renderer_image renderer_get_depth_image(
     VkPhysicalDevice physical_device,
     VkDevice device,
     VkCommandPool command_pool,
@@ -176,27 +183,34 @@ void renderer_create_framebuffers(
     uint32_t swapchain_image_count
 );
 
-void renderer_create_image(
+struct renderer_buffer renderer_get_buffer(
     VkPhysicalDevice physical_device,
     VkDevice device,
-    stbi_uc* pixels,
-    struct texture_image* tex_image,
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags memory_flags
+);
+
+struct renderer_image renderer_get_image(
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    VkExtent3D extent,
     VkFormat format,
     VkImageTiling tiling,
     VkImageUsageFlags usage,
     VkMemoryPropertyFlags memory_flags
 );
 
-struct texture_image renderer_load_texture(
+struct renderer_buffer renderer_get_uniform_buffer(
+    VkPhysicalDevice physical_device,
+    VkDevice device
+);
+
+struct renderer_image renderer_load_texture(
     const char* src,
     VkPhysicalDevice physical_device,
     VkDevice device,
     VkCommandPool command_pool
-);
-
-struct buffer renderer_get_uniform_buffer(
-    VkPhysicalDevice physical_device,
-    VkDevice device
 );
 
 VkDescriptorPool renderer_get_descriptor_pool(
@@ -205,6 +219,15 @@ VkDescriptorPool renderer_get_descriptor_pool(
 
 VkDescriptorSetLayout renderer_get_descriptor_layout(
     VkDevice device
+);
+
+VkDescriptorSet renderer_get_descriptor_set(
+    VkDevice device,
+    VkDescriptorPool descriptor_pool,
+    VkDescriptorSetLayout* descriptor_layouts,
+    uint32_t descriptor_count,
+    struct renderer_buffer* uniform_buffer,
+    struct renderer_image* tex_image
 );
 
 #endif
