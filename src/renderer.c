@@ -12,47 +12,44 @@
 
 #define VALIDATION_ENABLED 1
 
-void renderer_prepare_vk(GLFWwindow* window)
+void renderer_create_resources(
+        struct renderer_resources* resources,
+        GLFWwindow* window)
 {
-    // Creation
-    VkInstance instance;
-    instance = renderer_get_vk_instance();
-    assert(instance != VK_NULL_HANDLE);
+    resources->instance = renderer_get_instance();
+    assert(resources->instance != VK_NULL_HANDLE);
 
     PFN_vkCreateDebugReportCallbackEXT fp_create_debug_callback;
     fp_create_debug_callback =
             (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(
-                    instance,
+                    resources->instance,
                     "vkCreateDebugReportCallbackEXT"
             );
     assert(*fp_create_debug_callback);
 
-    VkDebugReportCallbackEXT debug_callback_ext;
-    debug_callback_ext = renderer_get_debug_callback(
-        instance,
+    resources->debug_callback_ext = renderer_get_debug_callback(
+        resources->instance,
         fp_create_debug_callback
     );
 
-    VkSurfaceKHR surface;
-    surface = renderer_get_vk_surface(
-        instance,
+    resources->surface = renderer_get_surface(
+        resources->instance,
         window
     );
-    assert(surface != VK_NULL_HANDLE);
+    assert(resources->surface != VK_NULL_HANDLE);
 
     const char* device_extensions[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
     uint32_t device_extension_count = 1;
 
-    VkPhysicalDevice physical_device;
-    physical_device = renderer_get_vk_physical_device(
-        instance,
-        surface,
+    resources->physical_device = renderer_get_physical_device(
+        resources->instance,
+        resources->surface,
         device_extension_count,
         device_extensions
     );
-    assert(physical_device != VK_NULL_HANDLE);
+    assert(resources->physical_device != VK_NULL_HANDLE);
 
 	VkPhysicalDeviceFeatures required_features;
     memset(&required_features, VK_FALSE, sizeof(required_features));
@@ -63,97 +60,91 @@ void renderer_prepare_vk(GLFWwindow* window)
     required_features.sampleRateShading = VK_TRUE;
     required_features.samplerAnisotropy = VK_TRUE;
 
-    VkDevice device;
-    device = renderer_get_vk_device(
-        physical_device,
-        surface,
+    resources->device = renderer_get_device(
+        resources->physical_device,
+        resources->surface,
         &required_features,
         device_extension_count,
         device_extensions
     );
-    assert(device != VK_NULL_HANDLE);
+    assert(resources->device != VK_NULL_HANDLE);
 
     VkSurfaceFormatKHR image_format;
-    image_format = renderer_get_vk_image_format(
-        physical_device,
-        surface
+    image_format = renderer_get_image_format(
+        resources->physical_device,
+        resources->surface
     );
 
     VkExtent2D image_extent;
-    image_extent = renderer_get_vk_image_extent(
-        physical_device,
-        surface,
+    image_extent = renderer_get_image_extent(
+        resources->physical_device,
+        resources->surface,
         640,
         480
     );
 
-    VkSwapchainKHR swapchain;
-    swapchain = renderer_get_vk_swapchain(
-        physical_device,
-        device,
-        surface,
+    resources->swapchain = renderer_get_swapchain(
+        resources->physical_device,
+        resources->device,
+        resources->surface,
         image_format,
         image_extent,
         VK_NULL_HANDLE
     );
-    assert(swapchain != VK_NULL_HANDLE);
+    assert(resources->swapchain != VK_NULL_HANDLE);
 
-    struct swapchain_buffer* swapchain_buffers = NULL;
-    uint32_t image_count;
     renderer_create_swapchain_buffers(
-        device,
-        swapchain,
+        resources->device,
+        resources->swapchain,
         image_format,
-        &swapchain_buffers,
-        &image_count
+        &resources->swapchain_buffers,
+        &resources->swapchain_image_count
     );
 
-    VkCommandPool command_pool;
-    command_pool = renderer_get_vk_command_pool(
-        physical_device,
-        device
+    resources->command_pool = renderer_get_command_pool(
+        resources->physical_device,
+        resources->device
     );
-    assert(command_pool != VK_NULL_HANDLE);
+    assert(resources->command_pool != VK_NULL_HANDLE);
 
     VkFormat depth_format;
-    depth_format = renderer_get_vk_depth_format(
-        physical_device,
+    depth_format = renderer_get_depth_format(
+        resources->physical_device,
         VK_IMAGE_TILING_OPTIMAL,
         VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
     );
     assert(depth_format != VK_FORMAT_UNDEFINED);
 
-    struct renderer_image depth_image;
-    depth_image = renderer_get_depth_image(
-        physical_device,
-        device,
-        command_pool,
+    resources->depth_image = renderer_get_depth_image(
+        resources->physical_device,
+        resources->device,
+        resources->command_pool,
         image_extent,
         depth_format
     );
 
-    VkRenderPass render_pass;
-    render_pass = renderer_get_vk_render_pass(
-        device,
+    resources->render_pass = renderer_get_render_pass(
+        resources->device,
         image_format.format,
         depth_format
     );
-    assert(render_pass != VK_NULL_HANDLE);
+    assert(resources->render_pass != VK_NULL_HANDLE);
 
-    VkFramebuffer* framebuffers = NULL;
-    framebuffers = malloc(image_count * sizeof(*framebuffers));
-    assert(framebuffers);
+    resources->framebuffers = malloc(
+        resources->swapchain_image_count * sizeof(*resources->framebuffers)
+    );
+    assert(resources->framebuffers);
     renderer_create_framebuffers(
-        device,
-        render_pass,
+        resources->device,
+        resources->render_pass,
         image_extent,
-        swapchain_buffers,
-        depth_image.image_view,
-        framebuffers,
-        image_count
+        resources->swapchain_buffers,
+        resources->depth_image.image_view,
+        resources->framebuffers,
+        resources->swapchain_image_count
     );
 
-    struct renderer_buffer uniform_buffer;
+    /*struct renderer_buffer uniform_buffer;
     uniform_buffer = renderer_get_uniform_buffer(
         physical_device,
         device
@@ -165,78 +156,181 @@ void renderer_prepare_vk(GLFWwindow* window)
         physical_device,
         device,
         command_pool
+    );*/
+}
+
+void renderer_destroy_resources(
+        struct renderer_resources* resources)
+{
+    uint32_t i;
+
+    /*vkDestroyImage(device, my_texture.image, NULL);
+    vkDestroyImageView(device, my_texture.image_view, NULL);
+    vkFreeMemory(device, my_texture.memory, NULL);
+    vkDestroySampler(device, my_texture.sampler, NULL);*/
+
+    /*vkDestroyBuffer(device, uniform_buffer.buffer, NULL);
+    vkFreeMemory(device, uniform_buffer.memory, NULL);*/
+
+    for (i=0; i<resources->swapchain_image_count; i++) {
+        vkDestroyFramebuffer(
+            resources->device,
+            resources->framebuffers[i],
+            NULL
+        );
+    }
+
+    vkDestroyRenderPass(resources->device, resources->render_pass, NULL);
+
+    vkDestroyImage(resources->device, resources->depth_image.image, NULL);
+    vkDestroyImageView(
+            resources->device, resources->depth_image.image_view, NULL);
+    vkFreeMemory(resources->device, resources->depth_image.memory, NULL);
+
+    vkDestroyCommandPool(resources->device, resources->command_pool, NULL);
+
+    for (i=0; i<resources->swapchain_image_count; i++) {
+        vkDestroyImageView(
+            resources->device,
+            resources->swapchain_buffers[i].image_view,
+            NULL
+        );
+    }
+    free(resources->swapchain_buffers);
+    resources->swapchain_buffers = NULL;
+
+    vkDestroySwapchainKHR(
+        resources->device,
+        resources->swapchain,
+        NULL
     );
 
-    VkDescriptorPool descriptor_pool;
-    descriptor_pool = renderer_get_descriptor_pool(device);
-    assert(descriptor_pool != VK_NULL_HANDLE);
+    vkDestroyDevice(resources->device, NULL);
+
+    vkDestroySurfaceKHR(
+        resources->instance,
+        resources->surface,
+        NULL
+    );
+
+    PFN_vkDestroyDebugReportCallbackEXT fp_destroy_debug_callback;
+    fp_destroy_debug_callback =
+            (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
+                    resources->instance,
+                    "vkDestroyDebugReportCallbackEXT"
+            );
+    assert(*fp_destroy_debug_callback);
+    fp_destroy_debug_callback(
+        resources->instance,
+        resources->debug_callback_ext,
+        NULL
+    );
+
+    vkDestroyInstance(resources->instance, NULL);
+}
+
+/*void renderer_prepare_base_pipeline()
+{
+    char* vert_code_buffer;
+    VkPipelineShaderStageCreateInfo* vert_shader_stage;
+    vert_shader_stage = renderer_get_shader_stage(
+        "asserts/shaders/vert.spv",
+        device,
+        &vert_code_buffer,
+        VK_SHADER_STAGE_VERTEX_BIT
+    );
+
+    char* frag_code_buffer;
+    VkPipelineShaderStageCreateInfo* frag_shader_stage;
+    frag_shader_stage = renderer_get_shader_stage(
+        "asserts/shaders/frag.spv",
+        device,
+        &frag_code_buffer,
+        VK_SHADER_STAGE_FRAGMENT_BIT
+    );
+
+    VkPipelineShaderStageCreateInfo shader_stages[] = {
+        vert_shader_stage,
+        frag_shader_stage
+    };
+    uint32_t shader_stage_count = 2;
+
+    VkPipelineVertexInputStateCreateInfo* vertex_input_state;
+    vertex_input_state = renderer_get_vertex_input_state(
+        sizeof(struct struct_vertex),
+        VK_VERTEX_INPUT_RATE_VERTEX
+    );
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_state;
+    input_assembly_state = renderer_get_input_assembly_state();
+
+    VkPipelineTessellationStateCreateInfo tessellation_state;
+    tessellation_state = NULL;
+
+    VkViewport viewport = renderer_get_viewport(0, 0, swapchain_extent);
+    VkRect2D scissor = renderer_get_scissor(0, 0, swapchain_extent);
+    VkPipelineViewportStateCreateInfo viewport_state;
+    viewport_state = renderer_get_viewport_state(
+        &viewport, 1,
+        &scissor, 1
+    );
+
+    VkPipelineRasterizationStateCreateInfo rasterization_state;
+    rasterization_state = renderer_get_rasterization_state(
+        VK_CULL_MODE_BACK_BIT,
+        VK_FRONT_FACE_COUNTER_CLOCKWISE
+    );
+
+    VkPipelineMultisampleStateCreateInfo multisample_state;
+    multisample_state = renderer_get_multisample_state(VK_SAMPLE_COUNT_1_BIT);
+
+    VkPipelineDepthStencilStateCreateInfo depth_stencil_state;
+    depth_stencil_state = renderer_get_depth_stencil_state();
+
+    VkPipelineColorBlendAttachmentState color_blend_attachment;
+    color_blend_attachment = renderer_get_color_blend_attachment();
+    VkPipelineColorBlendStateCreateInfo color_blend_state;
+    color_blend_state = renderer_get_color_blend_state(
+        &color_blend_attachment, 1
+    );
 
     VkDescriptorSetLayout descriptor_layout;
     descriptor_layout = renderer_get_descriptor_layout(device);
     assert(descriptor_layout != VK_NULL_HANDLE);
 
-    printf("Vulkan initialized successfully\n");
-
-    // Destruction
-    uint32_t i;
-
-    vkDestroyDescriptorSetLayout(device, descriptor_layout, NULL);
-    vkDestroyDescriptorPool(device, descriptor_pool, NULL);
-
-    vkDestroyImage(device, my_texture.image, NULL);
-    vkDestroyImageView(device, my_texture.image_view, NULL);
-    vkFreeMemory(device, my_texture.memory, NULL);
-    vkDestroySampler(device, my_texture.sampler, NULL);
-
-    vkDestroyBuffer(device, uniform_buffer.buffer, NULL);
-    vkFreeMemory(device, uniform_buffer.memory, NULL);
-
-    for (i=0; i<image_count; i++) {
-        vkDestroyFramebuffer(device, framebuffers[i], NULL);
-    }
-
-    vkDestroyRenderPass(device, render_pass, NULL);
-
-    vkDestroyImage(device, depth_image.image, NULL);
-    vkDestroyImageView(device, depth_image.image_view, NULL);
-    vkFreeMemory(device, depth_image.memory, NULL);
-
-    vkDestroyCommandPool(device, command_pool, NULL);
-
-    for (i=0; i<image_count; i++) {
-        vkDestroyImageView(
-            device,
-            swapchain_buffers[i].image_view,
-            NULL
-        );
-    }
-    free(swapchain_buffers);
-
-    vkDestroySwapchainKHR(
+    VkPipelineLayout pipeline_layout;
+    pipeline_layout = renderer_get_pipeline_layout(
         device,
-        swapchain,
-        NULL
+        1
     );
 
-    vkDestroyDevice(device, NULL);
+    VkRenderPass render_pass;
+    uint32_t subpass;
 
-    vkDestroySurfaceKHR(instance, surface, NULL);
+    VkGraphicsPipelineCreateInfo base_pipeline_info = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        .pNext = NULL;
+        .flags = 0;
+        .stageCount = shader_stage_count;
+        .pStages = shader_stages;
+        .pVertexInputState = vertex_input_state;
+        .pInputAssemblyState = input_assembly_state;
+        .pTessellationState = tessellation_state;
+        .pViewportState = viewport_state;
+        .pRasterizationState = rasterization_state;
+        .pMultisampleState = multisample_state;
+        .pDepthStencilState = depth_stencil_state;
+        .pColorBlendState = color_blend_state;
+        .pDynamicState = dynamic_state;
+        .layout = pipeline_layout;
+        .renderPass = render_pass;
+        .subpass = subpass;
+        .basePipelineHandle = VK_NULL_HANDLE;
+        .basePipelineIndex = 0;
+    };
+}*/
 
-    PFN_vkDestroyDebugReportCallbackEXT fp_destroy_debug_callback;
-    fp_destroy_debug_callback =
-            (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
-                    instance,
-                    "vkDestroyDebugReportCallbackEXT"
-            );
-    assert(*fp_destroy_debug_callback);
-    fp_destroy_debug_callback(instance, debug_callback_ext, NULL);
-
-    vkDestroyInstance(instance, NULL);
-
-    printf("Vulkan destroyed successfully\n");
-}
-
-VkInstance renderer_get_vk_instance()
+VkInstance renderer_get_instance()
 {
     VkInstance instance_handle;
     instance_handle = VK_NULL_HANDLE;
@@ -422,7 +516,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL renderer_debug_callback(
     return VK_FALSE;
 }
 
-VkSurfaceKHR renderer_get_vk_surface(
+VkSurfaceKHR renderer_get_surface(
         VkInstance instance,
         GLFWwindow* window)
 {
@@ -440,7 +534,7 @@ VkSurfaceKHR renderer_get_vk_surface(
     return surface_handle;
 }
 
-VkPhysicalDevice renderer_get_vk_physical_device(
+VkPhysicalDevice renderer_get_physical_device(
         VkInstance instance,
         VkSurfaceKHR surface,
         uint32_t device_extension_count,
@@ -705,7 +799,7 @@ uint32_t renderer_get_present_queue(
     return present_queue_index;
 }
 
-VkDevice renderer_get_vk_device(
+VkDevice renderer_get_device(
         VkPhysicalDevice physical_device,
         VkSurfaceKHR surface,
         VkPhysicalDeviceFeatures* required_features,
@@ -780,7 +874,7 @@ VkDevice renderer_get_vk_device(
     return device_handle;
 }
 
-VkSurfaceFormatKHR renderer_get_vk_image_format(
+VkSurfaceFormatKHR renderer_get_image_format(
         VkPhysicalDevice physical_device,
         VkSurfaceKHR surface)
 {
@@ -839,7 +933,7 @@ VkSurfaceFormatKHR renderer_get_vk_image_format(
     return image_format;
 }
 
-VkExtent2D renderer_get_vk_image_extent(
+VkExtent2D renderer_get_image_extent(
         VkPhysicalDevice physical_device,
         VkSurfaceKHR surface,
         uint32_t window_width,
@@ -875,7 +969,7 @@ VkExtent2D renderer_get_vk_image_extent(
     return extent;
 }
 
-VkSwapchainKHR renderer_get_vk_swapchain(
+VkSwapchainKHR renderer_get_swapchain(
         VkPhysicalDevice physical_device,
         VkDevice device,
         VkSurfaceKHR surface,
@@ -1079,7 +1173,7 @@ void renderer_create_swapchain_buffers(
     free(images);
 }
 
-VkCommandPool renderer_get_vk_command_pool(
+VkCommandPool renderer_get_command_pool(
         VkPhysicalDevice physical_device,
         VkDevice device)
 {
@@ -1270,7 +1364,7 @@ uint32_t renderer_find_memory_type(
     return memory_type;
 }
 
-VkFormat renderer_get_vk_depth_format(
+VkFormat renderer_get_depth_format(
         VkPhysicalDevice physicalDevice,
         VkImageTiling tiling,
         VkFormatFeatureFlags features)
@@ -1417,7 +1511,7 @@ struct renderer_image renderer_get_depth_image(
     return depth_image;
 }
 
-VkRenderPass renderer_get_vk_render_pass(
+VkRenderPass renderer_get_render_pass(
         VkDevice device,
         VkFormat image_format,
         VkFormat depth_format)
@@ -2033,4 +2127,346 @@ VkDescriptorSet renderer_get_descriptor_set(
     vkUpdateDescriptorSets(device, 2, descriptor_writes, 0, NULL);
 
     return descriptor_set_handle;
+}
+
+VkPipelineShaderStageCreateInfo renderer_get_shader_stage(
+        const char* fname,
+        VkDevice device,
+        char** shader_code_buffer,
+        VkShaderStageFlagBits stage)
+{
+    VkPipelineShaderStageCreateInfo shader_stage_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .stage = stage,
+        .pName = "main",
+        .pSpecializationInfo = NULL
+    };
+
+    FILE* fp = fopen(fname, "r");
+    assert(fp);
+
+    uint32_t code_size;
+    fseek(fp, 0L, SEEK_END);
+    code_size = ftell(fp);
+    rewind(fp);
+
+    *shader_code_buffer = malloc(code_size);
+    assert(*shader_code_buffer);
+
+    size_t bytes_read;
+    bytes_read = fread(*shader_code_buffer, 1, code_size, fp);
+    assert(bytes_read);
+
+    VkShaderModuleCreateInfo shader_module_info = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .codeSize = code_size,
+        .pCode = (uint32_t*)(*shader_code_buffer)
+    };
+
+    VkShaderModule module;
+    VkResult result;
+    result = vkCreateShaderModule(
+        device,
+        &shader_module_info,
+        NULL,
+        &module
+    );
+    assert(result == VK_SUCCESS);
+    shader_stage_info.module = module;
+
+    return shader_stage_info;
+}
+
+VkPipelineVertexInputStateCreateInfo renderer_get_vertex_input_state(
+        uint32_t vertex_size,
+        VkVertexInputRate vertex_input_rate)
+{
+    VkPipelineVertexInputStateCreateInfo vertex_input_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+    };
+
+    VkVertexInputBindingDescription binding_description = {
+        .binding = 0,
+        .stride = vertex_size,
+        .inputRate = vertex_input_rate
+    };
+
+    VkVertexInputAttributeDescription position_attribute_description = {
+        .location = 0,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(struct renderer_vertex, x)
+    };
+    VkVertexInputAttributeDescription texture_attribute_description = {
+        .location = 1,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32_SFLOAT,
+        .offset = offsetof(struct renderer_vertex, u)
+    };
+
+    VkVertexInputAttributeDescription attribute_descriptions[] = {
+        position_attribute_description,
+        texture_attribute_description
+    };
+
+    vertex_input_state.vertexBindingDescriptionCount = 1;
+    vertex_input_state.pVertexBindingDescriptions = &binding_description;
+    vertex_input_state.vertexAttributeDescriptionCount = 2;
+    vertex_input_state.pVertexAttributeDescriptions = attribute_descriptions;
+
+    return vertex_input_state;
+}
+
+VkPipelineInputAssemblyStateCreateInfo renderer_get_input_assembly_state()
+{
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .primitiveRestartEnable = VK_FALSE
+    };
+
+    return input_assembly_state;
+}
+
+VkPipelineTessellationStateCreateInfo renderer_get_tessellation_state(
+        uint32_t patch_control_points)
+{
+    VkPipelineTessellationStateCreateInfo tesselation_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
+        .pNext =  NULL,
+        .flags = 0,
+        .patchControlPoints = patch_control_points
+    };
+
+    return tesselation_state;
+}
+
+VkViewport renderer_get_viewport(
+        float viewport_x,
+        float viewport_y,
+        VkExtent2D extent)
+{
+    VkViewport viewport = {
+        .x = viewport_x,
+        .y = viewport_y,
+        .width = (float)extent.width,
+        .height = (float)extent.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
+
+    return viewport;
+}
+
+VkRect2D renderer_get_scissor(
+        float scissor_x,
+        float scissor_y,
+        VkExtent2D extent)
+{
+	VkRect2D scissor = {
+		.offset = {scissor_x, scissor_y},
+		.extent = extent
+	};
+
+    return scissor;
+}
+
+
+VkPipelineViewportStateCreateInfo renderer_get_viewport_state(
+        VkViewport* viewports,
+        uint32_t viewport_count,
+        VkRect2D* scissors,
+        uint32_t scissor_count)
+{
+    VkPipelineViewportStateCreateInfo viewport_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .viewportCount = viewport_count,
+        .pViewports = viewports,
+        .scissorCount = scissor_count,
+        .pScissors = scissors
+    };
+
+    return viewport_state;
+}
+
+VkPipelineRasterizationStateCreateInfo renderer_get_rasterization_state(
+        VkCullModeFlags cull_mode,
+        VkFrontFace front_face)
+{
+    VkPipelineRasterizationStateCreateInfo rasterization_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .depthClampEnable = VK_FALSE,
+        .rasterizerDiscardEnable = VK_FALSE,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = cull_mode,
+        .frontFace = front_face,
+        .depthBiasEnable = VK_FALSE,
+        .depthBiasConstantFactor = 0.0f,
+        .depthBiasClamp = 0.0f,
+        .depthBiasSlopeFactor = 0.0f,
+        .lineWidth = 1.0f
+    };
+
+    return rasterization_state;
+}
+
+VkPipelineMultisampleStateCreateInfo renderer_get_multisample_state(
+        VkSampleCountFlagBits rasterization_samples)
+{
+    VkPipelineMultisampleStateCreateInfo multisample_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .rasterizationSamples = rasterization_samples,
+        .sampleShadingEnable = VK_FALSE,
+        .minSampleShading = 0.0f,
+        .pSampleMask = NULL,
+        .alphaToCoverageEnable = VK_FALSE,
+        .alphaToOneEnable = VK_FALSE
+    };
+
+    return multisample_state;
+}
+
+VkPipelineDepthStencilStateCreateInfo renderer_get_depth_stencil_state()
+{
+    VkPipelineDepthStencilStateCreateInfo depth_stencil_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS,
+        .depthBoundsTestEnable = VK_FALSE,
+        .stencilTestEnable = VK_FALSE,
+        .front.failOp = 0,
+        .front.passOp = 0,
+        .front.depthFailOp = 0,
+        .front.compareOp = 0,
+        .front.compareMask = 0,
+        .front.writeMask = 0,
+        .front.reference = 0,
+        .back.failOp = 0,
+        .back.passOp = 0,
+        .back.depthFailOp = 0,
+        .back.compareOp = 0,
+        .back.compareMask = 0,
+        .back.writeMask = 0,
+        .back.reference = 0,
+        .minDepthBounds = 0.0f,
+        .maxDepthBounds = 1.0f
+    };
+
+    return depth_stencil_state;
+}
+
+VkPipelineColorBlendAttachmentState renderer_get_color_blend_attachment()
+{
+    VkPipelineColorBlendAttachmentState color_blend_attachment = {
+        .blendEnable = VK_FALSE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .colorWriteMask =
+            VK_COLOR_COMPONENT_R_BIT |
+            VK_COLOR_COMPONENT_G_BIT |
+            VK_COLOR_COMPONENT_B_BIT |
+            VK_COLOR_COMPONENT_A_BIT
+    };
+
+    return color_blend_attachment;
+}
+
+
+VkPipelineColorBlendStateCreateInfo renderer_get_color_blend_state(
+        VkPipelineColorBlendAttachmentState* attachments,
+        uint32_t attachment_count)
+{
+    VkPipelineColorBlendStateCreateInfo color_blend_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .logicOpEnable = VK_FALSE,
+        .logicOp = 0,
+        .attachmentCount = attachment_count,
+        .pAttachments = attachments,
+        .blendConstants[0] = 0.0f,
+        .blendConstants[1] = 0.0f,
+        .blendConstants[2] = 0.0f,
+        .blendConstants[3] = 0.0f
+    };
+
+    return color_blend_state;
+}
+
+/*VkPipelineDynamicStateCreateInfo renderer_get_dynamic_state()
+{
+}*/
+
+VkPipelineLayout renderer_get_pipeline_layout(
+        VkDevice device,
+        VkDescriptorSetLayout* descriptor_layouts,
+        uint32_t descriptor_layout_count,
+        VkPushConstantRange* push_constant_ranges,
+        uint32_t push_constant_range_count)
+{
+    VkPipelineLayout pipeline_layout_handle;
+    pipeline_layout_handle = VK_NULL_HANDLE;
+
+    VkPipelineLayoutCreateInfo layout_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .setLayoutCount = descriptor_layout_count,
+        .pSetLayouts = descriptor_layouts,
+        .pushConstantRangeCount = push_constant_range_count,
+        .pPushConstantRanges = push_constant_ranges
+    };
+
+    VkResult result;
+    result = vkCreatePipelineLayout(
+        device,
+        &layout_info,
+        NULL,
+        &pipeline_layout_handle
+    );
+    assert(result == VK_SUCCESS);
+
+    return pipeline_layout_handle;
+}
+
+VkPipeline renderer_get_graphics_pipeline(
+        VkDevice device,
+        VkGraphicsPipelineCreateInfo* create_info)
+{
+    VkPipeline graphics_pipeline_handle;
+    graphics_pipeline_handle = VK_NULL_HANDLE;
+
+    VkResult result;
+    result = vkCreateGraphicsPipelines(
+        device,
+        VK_NULL_HANDLE,
+        1,
+        create_info,
+        NULL,
+        &graphics_pipeline_handle
+    );
+    assert(result == VK_SUCCESS);
+
+    return graphics_pipeline_handle;
 }

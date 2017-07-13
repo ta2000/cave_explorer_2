@@ -12,10 +12,9 @@ void game_init(struct game* self)
 	glfwInit();
 
     assert(glfwVulkanSupported() == GLFW_TRUE);
-    self->setup_renderer = &game_setup_vk_renderer;
 }
 
-void game_setup_vk_renderer(struct game* self)
+void game_setup_renderer(struct game* self)
 {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
@@ -31,5 +30,11 @@ void game_setup_vk_renderer(struct game* self)
     //glfwSetWindowSizeCallback(window, onWindowResized);
     //glfwSetKeyCallback(window, keyCallback);
 
-    renderer_prepare_vk(window);
+    struct renderer_resources resources;
+    renderer_create_resources(&resources, window);
+    printf("Renderer created prepared successfully.\n");
+    renderer_destroy_resources(&resources);
+    printf("Renderer resources destroyed successfully.\n");
+
+    glfwDestroyWindow(window);
 }

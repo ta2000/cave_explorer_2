@@ -11,9 +11,10 @@
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
-struct vertex
+struct renderer_vertex
 {
     float x,y,z;
+    float u,v;
 };
 
 struct renderer_image
@@ -42,9 +43,32 @@ struct swapchain_buffer
     VkCommandBuffer cmd_buffer;
 };
 
-void renderer_prepare_vk(GLFWwindow* window);
+struct renderer_resources
+{
+    VkInstance instance;
+    VkDebugReportCallbackEXT debug_callback_ext;
+    VkSurfaceKHR surface;
+    VkPhysicalDevice physical_device;
+    VkDevice device;
+    VkSwapchainKHR swapchain;
+    struct swapchain_buffer* swapchain_buffers;
+    uint32_t swapchain_image_count;
+    VkCommandPool command_pool;
+    struct renderer_image depth_image;
+    VkRenderPass render_pass;
+    VkFramebuffer* framebuffers;
+};
 
-VkInstance renderer_get_vk_instance();
+void renderer_create_resources(
+    struct renderer_resources* resources,
+    GLFWwindow* window
+);
+void renderer_destroy_resources(
+    struct renderer_resources* resources
+);
+void renderer_create_base_pipeline();
+
+VkInstance renderer_get_instance();
 
 VkDebugReportCallbackEXT renderer_get_debug_callback(
     VkInstance instance,
@@ -61,12 +85,12 @@ VKAPI_ATTR VkBool32 VKAPI_CALL renderer_debug_callback(
     void* p_user_data
 );
 
-VkSurfaceKHR renderer_get_vk_surface(
+VkSurfaceKHR renderer_get_surface(
     VkInstance instance,
     GLFWwindow* window
 );
 
-VkPhysicalDevice renderer_get_vk_physical_device(
+VkPhysicalDevice renderer_get_physical_device(
     VkInstance instance,
     VkSurfaceKHR surface,
     uint32_t device_extension_count,
@@ -87,7 +111,7 @@ uint32_t renderer_get_present_queue(
     VkSurfaceKHR surface
 );
 
-VkDevice renderer_get_vk_device(
+VkDevice renderer_get_device(
     VkPhysicalDevice physical_device,
     VkSurfaceKHR surface,
     VkPhysicalDeviceFeatures* required_features,
@@ -95,19 +119,19 @@ VkDevice renderer_get_vk_device(
     const char** device_extensions
 );
 
-VkSurfaceFormatKHR renderer_get_vk_image_format(
+VkSurfaceFormatKHR renderer_get_image_format(
     VkPhysicalDevice physical_device,
     VkSurfaceKHR surface
 );
 
-VkExtent2D renderer_get_vk_image_extent(
+VkExtent2D renderer_get_image_extent(
     VkPhysicalDevice physical_device,
     VkSurfaceKHR surface,
     uint32_t window_width,
     uint32_t window_height
 );
 
-VkSwapchainKHR renderer_get_vk_swapchain(
+VkSwapchainKHR renderer_get_swapchain(
     VkPhysicalDevice physical_device,
     VkDevice device,
     VkSurfaceKHR surface,
@@ -124,7 +148,7 @@ void renderer_create_swapchain_buffers(
     uint32_t* swapchain_buffer_count
 );
 
-VkCommandPool renderer_get_vk_command_pool(
+VkCommandPool renderer_get_command_pool(
     VkPhysicalDevice physical_device,
     VkDevice device
 );
@@ -153,7 +177,7 @@ uint32_t renderer_find_memory_type(
     VkMemoryType* memoryTypes
 );
 
-VkFormat renderer_get_vk_depth_format(
+VkFormat renderer_get_depth_format(
     VkPhysicalDevice physical_device,
     VkImageTiling tiling,
     VkFormatFeatureFlags features
@@ -167,7 +191,7 @@ struct renderer_image renderer_get_depth_image(
     VkFormat depth_format
 );
 
-VkRenderPass renderer_get_vk_render_pass(
+VkRenderPass renderer_get_render_pass(
     VkDevice device,
     VkFormat image_format,
     VkFormat depth_format
@@ -191,6 +215,11 @@ struct renderer_buffer renderer_get_buffer(
     VkMemoryPropertyFlags memory_flags
 );
 
+struct renderer_buffer renderer_get_uniform_buffer(
+    VkPhysicalDevice physical_device,
+    VkDevice device
+);
+
 struct renderer_image renderer_get_image(
     VkPhysicalDevice physical_device,
     VkDevice device,
@@ -199,11 +228,6 @@ struct renderer_image renderer_get_image(
     VkImageTiling tiling,
     VkImageUsageFlags usage,
     VkMemoryPropertyFlags memory_flags
-);
-
-struct renderer_buffer renderer_get_uniform_buffer(
-    VkPhysicalDevice physical_device,
-    VkDevice device
 );
 
 struct renderer_image renderer_load_texture(
@@ -228,6 +252,74 @@ VkDescriptorSet renderer_get_descriptor_set(
     uint32_t descriptor_count,
     struct renderer_buffer* uniform_buffer,
     struct renderer_image* tex_image
+);
+
+VkPipelineShaderStageCreateInfo renderer_get_shader_stage(
+    const char* fname,
+    VkDevice device,
+    char** shader_code_buffer,
+    VkShaderStageFlagBits stage
+);
+
+VkPipelineVertexInputStateCreateInfo renderer_get_vertex_input_state(
+    uint32_t vertex_size,
+    VkVertexInputRate vertex_input_rate
+);
+
+VkPipelineInputAssemblyStateCreateInfo renderer_get_input_assembly_state();
+
+VkPipelineTessellationStateCreateInfo renderer_get_tessellation_state(
+    uint32_t patch_control_points
+);
+
+VkViewport renderer_get_viewport(
+    float viewport_x,
+    float viewport_y,
+    VkExtent2D extent
+);
+
+VkRect2D renderer_get_scissor(
+    float scissor_x,
+    float scissor_y,
+    VkExtent2D extent
+);
+
+VkPipelineViewportStateCreateInfo renderer_get_viewport_state(
+    VkViewport* viewports,
+    uint32_t viewport_count,
+    VkRect2D* scissors,
+    uint32_t scissor_count
+);
+
+VkPipelineRasterizationStateCreateInfo renderer_get_rasterization_state(
+    VkCullModeFlags cull_mode,
+    VkFrontFace front_face
+);
+
+VkPipelineMultisampleStateCreateInfo renderer_get_multisample_state(
+    VkSampleCountFlagBits rasterization_samples
+);
+
+VkPipelineDepthStencilStateCreateInfo renderer_get_depth_stencil_state();
+
+VkPipelineColorBlendAttachmentState renderer_get_color_blend_attachment();
+
+VkPipelineColorBlendStateCreateInfo renderer_get_color_blend_state(
+    VkPipelineColorBlendAttachmentState* attachments,
+    uint32_t attachment_count
+);
+
+VkPipelineLayout renderer_get_pipeline_layout(
+    VkDevice device,
+    VkDescriptorSetLayout* descriptor_layouts,
+    uint32_t descriptor_layout_count,
+    VkPushConstantRange* push_contant_ranges,
+    uint32_t push_constant_range_count
+);
+
+VkPipeline renderer_get_graphics_pipeline(
+    VkDevice device,
+    VkGraphicsPipelineCreateInfo* create_info
 );
 
 #endif

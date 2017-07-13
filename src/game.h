@@ -3,10 +3,10 @@
 
 struct game
 {
-    void (*setup_renderer)(struct game*);
+    int no_warning;
 };
 
 void game_init(struct game* self);
-void game_setup_vk_renderer(struct game* self);
+void game_setup_renderer(struct game* self);
 
 #endif
