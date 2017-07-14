@@ -34,6 +34,7 @@ struct renderer_buffer
     VkBuffer buffer;
     VkDeviceMemory memory;
     VkDeviceSize size;
+    void* mapped;
 };
 
 struct swapchain_buffer
@@ -213,6 +214,14 @@ struct renderer_buffer renderer_get_buffer(
     VkDeviceSize size,
     VkBufferUsageFlags usage,
     VkMemoryPropertyFlags memory_flags
+);
+
+struct renderer_buffer renderer_get_vertex_buffer(
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    VkCommandPool command_pool,
+    struct renderer_vertex* vertices,
+    uint32_t vertex_count
 );
 
 struct renderer_buffer renderer_get_uniform_buffer(

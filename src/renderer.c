@@ -234,7 +234,7 @@ void renderer_destroy_resources(
     char* vert_code_buffer;
     VkPipelineShaderStageCreateInfo* vert_shader_stage;
     vert_shader_stage = renderer_get_shader_stage(
-        "asserts/shaders/vert.spv",
+        "assets/shaders/vert.spv",
         device,
         &vert_code_buffer,
         VK_SHADER_STAGE_VERTEX_BIT
@@ -243,7 +243,7 @@ void renderer_destroy_resources(
     char* frag_code_buffer;
     VkPipelineShaderStageCreateInfo* frag_shader_stage;
     frag_shader_stage = renderer_get_shader_stage(
-        "asserts/shaders/frag.spv",
+        "assets/shaders/frag.spv",
         device,
         &frag_code_buffer,
         VK_SHADER_STAGE_FRAGMENT_BIT
@@ -1337,6 +1337,13 @@ void renderer_change_image_layout(
     );
 
     renderer_submit_command_buffer(physical_device, device, &cmd);
+
+    vkFreeCommandBuffers(
+        device,
+        command_pool,
+        1,
+        &cmd
+    );
 }
 
 uint32_t renderer_find_memory_type(
@@ -1700,6 +1707,114 @@ struct renderer_buffer renderer_get_buffer(
     return buffer;
 }
 
+struct renderer_buffer renderer_get_vertex_buffer(
+        VkPhysicalDevice physical_device,
+        VkDevice device,
+        VkCommandPool command_pool,
+        struct renderer_vertex* vertices,
+        uint32_t vertex_count)
+{
+    struct renderer_buffer vbo;
+    struct renderer_buffer staging_vbo;
+
+    VkDeviceSize mem_size = sizeof(*vertices) * vertex_count;
+
+    staging_vbo = renderer_get_buffer(
+        physical_device,
+        device,
+        mem_size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    vkMapMemory(device, staging_vbo.memory, 0, mem_size, 0, &vbo.mapped);
+    memcpy(vbo.mapped, vertices, (size_t)mem_size);
+    vkUnmapMemory(device, staging_vbo.memory);
+
+    vbo = renderer_get_buffer(
+        physical_device,
+        device,
+        mem_size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+
+    VkCommandBuffer copy_cmd;
+    VkCommandBufferAllocateInfo cmd_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = NULL,
+        .commandPool = command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    VkResult result;
+    result = vkAllocateCommandBuffers(device, &cmd_alloc_info, &copy_cmd);
+    assert(result == VK_SUCCESS);
+
+    VkCommandBufferBeginInfo cmd_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = NULL,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = NULL
+    };
+    result = vkBeginCommandBuffer(copy_cmd, &cmd_begin_info);
+    assert(result == VK_SUCCESS);
+
+    VkBufferCopy region = {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = mem_size
+    };
+
+    vkCmdCopyBuffer(
+        copy_cmd,
+        staging_vbo.buffer,
+        vbo.buffer,
+        1,
+        &region
+    );
+
+    renderer_submit_command_buffer(
+        physical_device,
+        device,
+        &copy_cmd
+    );
+
+    vkFreeCommandBuffers(
+        device,
+        command_pool,
+        1,
+        &copy_cmd
+    );
+
+    vkDestroyBuffer(device, staging_vbo.buffer, NULL);
+    vkFreeMemory(device, staging_vbo.memory, NULL);
+
+    return vbo;
+}
+
+struct renderer_buffer renderer_get_uniform_buffer(
+        VkPhysicalDevice physical_device,
+        VkDevice device)
+{
+    struct renderer_buffer uniform_buffer;
+    uint32_t uniform_buffer_size = sizeof(float) * 16 * 3;
+    uniform_buffer = renderer_get_buffer(
+        physical_device,
+        device,
+        uniform_buffer_size,
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    uniform_buffer.size = uniform_buffer_size;
+
+    return uniform_buffer;
+}
+
 struct renderer_image renderer_get_image(
         VkPhysicalDevice physical_device,
         VkDevice device,
@@ -1758,26 +1873,6 @@ struct renderer_image renderer_get_image(
     vkBindImageMemory(device, image.image, image.memory, 0);
 
     return image;
-}
-
-struct renderer_buffer renderer_get_uniform_buffer(
-        VkPhysicalDevice physical_device,
-        VkDevice device)
-{
-    struct renderer_buffer uniform_buffer;
-    uint32_t uniform_buffer_size = sizeof(float) * 16 * 3;
-    uniform_buffer = renderer_get_buffer(
-        physical_device,
-        device,
-        uniform_buffer_size,
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-
-    uniform_buffer.size = uniform_buffer_size;
-
-    return uniform_buffer;
 }
 
 struct renderer_image renderer_load_texture(
@@ -1890,6 +1985,13 @@ struct renderer_image renderer_load_texture(
     renderer_submit_command_buffer(
         physical_device,
         device,
+        &copy_cmd
+    );
+
+    vkFreeCommandBuffers(
+        device,
+        command_pool,
+        1,
         &copy_cmd
     );
 
