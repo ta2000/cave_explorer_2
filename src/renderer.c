@@ -3,6 +3,11 @@
 #include <string.h>
 #include <assert.h>
 
+#include <assimp/cimport.h>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+#include <assimp/vector3.h>
+
 #include "renderer.h"
 
 #define APP_NAME "Cave Explorer 2"
@@ -144,19 +149,22 @@ void renderer_create_resources(
         resources->swapchain_image_count
     );
 
-    /*struct renderer_buffer uniform_buffer;
-    uniform_buffer = renderer_get_uniform_buffer(
-        physical_device,
-        device
+    resources->descriptor_pool = renderer_get_descriptor_pool(
+        resources->device
+    );
+    assert(resources->descriptor_pool != VK_NULL_HANDLE);
+
+    resources->descriptor_layout = renderer_get_descriptor_layout(
+        resources->device
+    );
+    assert(resources->descriptor_layout != VK_NULL_HANDLE);
+
+    resources->uniform_buffer = renderer_get_uniform_buffer(
+        resources->physical_device,
+        resources->device
     );
 
-    struct renderer_image my_texture;
-    my_texture = renderer_load_texture(
-        "assets/textures/plasma.png",
-        physical_device,
-        device,
-        command_pool
-    );*/
+    renderer_load_textured_model(resources);
 }
 
 void renderer_destroy_resources(
@@ -164,13 +172,25 @@ void renderer_destroy_resources(
 {
     uint32_t i;
 
-    /*vkDestroyImage(device, my_texture.image, NULL);
-    vkDestroyImageView(device, my_texture.image_view, NULL);
-    vkFreeMemory(device, my_texture.memory, NULL);
-    vkDestroySampler(device, my_texture.sampler, NULL);*/
+    vkDestroyBuffer(resources->device, resources->mesh.vbo.buffer, NULL);
+    vkFreeMemory(resources->device, resources->mesh.vbo.memory, NULL);
+    vkDestroyBuffer(resources->device, resources->mesh.ibo.buffer, NULL);
+    vkFreeMemory(resources->device, resources->mesh.ibo.memory, NULL);
 
-    /*vkDestroyBuffer(device, uniform_buffer.buffer, NULL);
-    vkFreeMemory(device, uniform_buffer.memory, NULL);*/
+    vkDestroyImage(resources->device, resources->mesh.texture->image, NULL);
+    vkDestroyImageView(
+            resources->device, resources->mesh.texture->image_view, NULL);
+    vkFreeMemory(resources->device, resources->mesh.texture->memory, NULL);
+    vkDestroySampler(
+            resources->device, resources->mesh.texture->sampler, NULL);
+
+    vkDestroyBuffer(resources->device, resources->uniform_buffer.buffer, NULL);
+    vkFreeMemory(resources->device, resources->uniform_buffer.memory, NULL);
+
+    vkDestroyDescriptorSetLayout(
+            resources->device, resources->descriptor_layout, NULL);
+    vkDestroyDescriptorPool(
+            resources->device, resources->descriptor_pool, NULL);
 
     for (i=0; i<resources->swapchain_image_count; i++) {
         vkDestroyFramebuffer(
@@ -228,107 +248,6 @@ void renderer_destroy_resources(
 
     vkDestroyInstance(resources->instance, NULL);
 }
-
-/*void renderer_prepare_base_pipeline()
-{
-    char* vert_code_buffer;
-    VkPipelineShaderStageCreateInfo* vert_shader_stage;
-    vert_shader_stage = renderer_get_shader_stage(
-        "assets/shaders/vert.spv",
-        device,
-        &vert_code_buffer,
-        VK_SHADER_STAGE_VERTEX_BIT
-    );
-
-    char* frag_code_buffer;
-    VkPipelineShaderStageCreateInfo* frag_shader_stage;
-    frag_shader_stage = renderer_get_shader_stage(
-        "assets/shaders/frag.spv",
-        device,
-        &frag_code_buffer,
-        VK_SHADER_STAGE_FRAGMENT_BIT
-    );
-
-    VkPipelineShaderStageCreateInfo shader_stages[] = {
-        vert_shader_stage,
-        frag_shader_stage
-    };
-    uint32_t shader_stage_count = 2;
-
-    VkPipelineVertexInputStateCreateInfo* vertex_input_state;
-    vertex_input_state = renderer_get_vertex_input_state(
-        sizeof(struct struct_vertex),
-        VK_VERTEX_INPUT_RATE_VERTEX
-    );
-
-    VkPipelineInputAssemblyStateCreateInfo input_assembly_state;
-    input_assembly_state = renderer_get_input_assembly_state();
-
-    VkPipelineTessellationStateCreateInfo tessellation_state;
-    tessellation_state = NULL;
-
-    VkViewport viewport = renderer_get_viewport(0, 0, swapchain_extent);
-    VkRect2D scissor = renderer_get_scissor(0, 0, swapchain_extent);
-    VkPipelineViewportStateCreateInfo viewport_state;
-    viewport_state = renderer_get_viewport_state(
-        &viewport, 1,
-        &scissor, 1
-    );
-
-    VkPipelineRasterizationStateCreateInfo rasterization_state;
-    rasterization_state = renderer_get_rasterization_state(
-        VK_CULL_MODE_BACK_BIT,
-        VK_FRONT_FACE_COUNTER_CLOCKWISE
-    );
-
-    VkPipelineMultisampleStateCreateInfo multisample_state;
-    multisample_state = renderer_get_multisample_state(VK_SAMPLE_COUNT_1_BIT);
-
-    VkPipelineDepthStencilStateCreateInfo depth_stencil_state;
-    depth_stencil_state = renderer_get_depth_stencil_state();
-
-    VkPipelineColorBlendAttachmentState color_blend_attachment;
-    color_blend_attachment = renderer_get_color_blend_attachment();
-    VkPipelineColorBlendStateCreateInfo color_blend_state;
-    color_blend_state = renderer_get_color_blend_state(
-        &color_blend_attachment, 1
-    );
-
-    VkDescriptorSetLayout descriptor_layout;
-    descriptor_layout = renderer_get_descriptor_layout(device);
-    assert(descriptor_layout != VK_NULL_HANDLE);
-
-    VkPipelineLayout pipeline_layout;
-    pipeline_layout = renderer_get_pipeline_layout(
-        device,
-        1
-    );
-
-    VkRenderPass render_pass;
-    uint32_t subpass;
-
-    VkGraphicsPipelineCreateInfo base_pipeline_info = {
-        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-        .pNext = NULL;
-        .flags = 0;
-        .stageCount = shader_stage_count;
-        .pStages = shader_stages;
-        .pVertexInputState = vertex_input_state;
-        .pInputAssemblyState = input_assembly_state;
-        .pTessellationState = tessellation_state;
-        .pViewportState = viewport_state;
-        .pRasterizationState = rasterization_state;
-        .pMultisampleState = multisample_state;
-        .pDepthStencilState = depth_stencil_state;
-        .pColorBlendState = color_blend_state;
-        .pDynamicState = dynamic_state;
-        .layout = pipeline_layout;
-        .renderPass = render_pass;
-        .subpass = subpass;
-        .basePipelineHandle = VK_NULL_HANDLE;
-        .basePipelineIndex = 0;
-    };
-}*/
 
 VkInstance renderer_get_instance()
 {
@@ -1795,6 +1714,94 @@ struct renderer_buffer renderer_get_vertex_buffer(
     return vbo;
 }
 
+struct renderer_buffer renderer_get_index_buffer(
+        VkPhysicalDevice physical_device,
+        VkDevice device,
+        VkCommandPool command_pool,
+        uint32_t* indices,
+        uint32_t index_count)
+{
+    struct renderer_buffer ibo;
+    struct renderer_buffer staging_ibo;
+
+    VkDeviceSize mem_size = sizeof(*indices) * index_count;
+
+    staging_ibo = renderer_get_buffer(
+        physical_device,
+        device,
+        mem_size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    vkMapMemory(device, staging_ibo.memory, 0, mem_size, 0, &ibo.mapped);
+    memcpy(ibo.mapped, indices, (size_t)mem_size);
+    vkUnmapMemory(device, staging_ibo.memory);
+
+    ibo = renderer_get_buffer(
+        physical_device,
+        device,
+        mem_size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+
+    VkCommandBuffer copy_cmd;
+    VkCommandBufferAllocateInfo cmd_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = NULL,
+        .commandPool = command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    VkResult result;
+    result = vkAllocateCommandBuffers(device, &cmd_alloc_info, &copy_cmd);
+    assert(result == VK_SUCCESS);
+
+    VkCommandBufferBeginInfo cmd_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = NULL,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = NULL
+    };
+    result = vkBeginCommandBuffer(copy_cmd, &cmd_begin_info);
+    assert(result == VK_SUCCESS);
+
+    VkBufferCopy region = {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = mem_size
+    };
+
+    vkCmdCopyBuffer(
+        copy_cmd,
+        staging_ibo.buffer,
+        ibo.buffer,
+        1,
+        &region
+    );
+
+    renderer_submit_command_buffer(
+        physical_device,
+        device,
+        &copy_cmd
+    );
+
+    vkFreeCommandBuffers(
+        device,
+        command_pool,
+        1,
+        &copy_cmd
+    );
+
+    vkDestroyBuffer(device, staging_ibo.buffer, NULL);
+    vkFreeMemory(device, staging_ibo.memory, NULL);
+
+    return ibo;
+}
+
 struct renderer_buffer renderer_get_uniform_buffer(
         VkPhysicalDevice physical_device,
         VkDevice device)
@@ -1813,6 +1820,12 @@ struct renderer_buffer renderer_get_uniform_buffer(
     uniform_buffer.size = uniform_buffer_size;
 
     return uniform_buffer;
+}
+
+void renderer_update_uniform_buffer(
+        struct renderer_buffer* uniform_buffer)
+{
+
 }
 
 struct renderer_image renderer_get_image(
@@ -2571,4 +2584,186 @@ VkPipeline renderer_get_graphics_pipeline(
     assert(result == VK_SUCCESS);
 
     return graphics_pipeline_handle;
+}
+
+VkPipeline renderer_get_base_graphics_pipeline(
+        VkDevice device,
+        VkExtent2D swapchain_extent,
+        VkRenderPass render_pass,
+        uint32_t subpass,
+        VkDescriptorSetLayout* descriptor_layouts,
+        uint32_t descriptor_layout_count)
+{
+    VkPipeline base_graphics_pipeline;
+
+    char* vert_code_buffer;
+    VkPipelineShaderStageCreateInfo vert_shader_stage;
+    vert_shader_stage = renderer_get_shader_stage(
+        "assets/shaders/vert.spv",
+        device,
+        &vert_code_buffer,
+        VK_SHADER_STAGE_VERTEX_BIT
+    );
+
+    char* frag_code_buffer;
+    VkPipelineShaderStageCreateInfo frag_shader_stage;
+    frag_shader_stage = renderer_get_shader_stage(
+        "assets/shaders/frag.spv",
+        device,
+        &frag_code_buffer,
+        VK_SHADER_STAGE_FRAGMENT_BIT
+    );
+
+    VkPipelineShaderStageCreateInfo shader_stages[] = {
+        vert_shader_stage,
+        frag_shader_stage
+    };
+    uint32_t shader_stage_count = 2;
+
+    VkPipelineVertexInputStateCreateInfo vertex_input_state;
+    vertex_input_state = renderer_get_vertex_input_state(
+        sizeof(struct renderer_vertex),
+        VK_VERTEX_INPUT_RATE_VERTEX
+    );
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_state;
+    input_assembly_state = renderer_get_input_assembly_state();
+
+    VkViewport viewport = renderer_get_viewport(0, 0, swapchain_extent);
+    VkRect2D scissor = renderer_get_scissor(0, 0, swapchain_extent);
+    VkPipelineViewportStateCreateInfo viewport_state;
+    viewport_state = renderer_get_viewport_state(
+        &viewport, 1,
+        &scissor, 1
+    );
+
+    VkPipelineRasterizationStateCreateInfo rasterization_state;
+    rasterization_state = renderer_get_rasterization_state(
+        VK_CULL_MODE_BACK_BIT,
+        VK_FRONT_FACE_COUNTER_CLOCKWISE
+    );
+
+    VkPipelineMultisampleStateCreateInfo multisample_state;
+    multisample_state = renderer_get_multisample_state(VK_SAMPLE_COUNT_1_BIT);
+
+    VkPipelineDepthStencilStateCreateInfo depth_stencil_state;
+    depth_stencil_state = renderer_get_depth_stencil_state();
+
+    VkPipelineColorBlendAttachmentState color_blend_attachment;
+    color_blend_attachment = renderer_get_color_blend_attachment();
+    VkPipelineColorBlendStateCreateInfo color_blend_state;
+    color_blend_state = renderer_get_color_blend_state(
+        &color_blend_attachment, 1
+    );
+
+    VkPipelineLayout pipeline_layout;
+    pipeline_layout = renderer_get_pipeline_layout(
+        device,
+        descriptor_layouts,
+        descriptor_layout_count,
+        NULL,
+        0
+    );
+
+    VkGraphicsPipelineCreateInfo base_pipeline_info = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .stageCount = shader_stage_count,
+        .pStages = shader_stages,
+        .pVertexInputState = &vertex_input_state,
+        .pInputAssemblyState = &input_assembly_state,
+        .pTessellationState = NULL,
+        .pViewportState = &viewport_state,
+        .pRasterizationState = &rasterization_state,
+        .pMultisampleState = &multisample_state,
+        .pDepthStencilState = &depth_stencil_state,
+        .pColorBlendState = &color_blend_state,
+        .pDynamicState = NULL,
+        .layout = pipeline_layout,
+        .renderPass = render_pass,
+        .subpass = subpass,
+        .basePipelineHandle = VK_NULL_HANDLE,
+        .basePipelineIndex = 0
+    };
+
+    base_graphics_pipeline = renderer_get_graphics_pipeline(
+        device,
+        &base_pipeline_info
+    );
+
+    return base_graphics_pipeline;
+}
+
+void renderer_load_textured_model(
+        struct renderer_resources* resources)
+{
+    struct renderer_image tex_image;
+    tex_image = renderer_load_texture(
+        "assets/textures/plasma.png",
+        resources->physical_device,
+        resources->device,
+        resources->command_pool
+    );
+
+    resources->mesh.texture = NULL;
+    resources->mesh.texture = malloc(sizeof(struct renderer_image));
+    assert(resources->mesh.texture);
+
+    memcpy(resources->mesh.texture, &tex_image, sizeof(tex_image));
+
+    const struct aiScene* scene = NULL;
+    scene = aiImportFile(
+        "assets/models/sphere.dae",
+        aiProcess_Triangulate |
+        aiProcess_GenSmoothNormals |
+        aiProcess_FlipUVs |
+        aiProcess_JoinIdenticalVertices
+    );
+    assert(scene);
+
+    struct aiMesh* mesh = scene->mMeshes[0];
+
+    struct renderer_vertex* vertices;
+    vertices = malloc(mesh->mNumVertices * sizeof(*vertices));
+    assert(vertices);
+
+    uint32_t i;
+    for (i=0; i<mesh->mNumVertices; i++) {
+        vertices[i].x = mesh->mVertices[i].x;
+        vertices[i].y = mesh->mVertices[i].y;
+        vertices[i].z = mesh->mVertices[i].z;
+        //vertices[i].u = mesh->mTextureCoords[0][i].x;
+        //vertices[i].v = mesh->mTextureCoords[0][i].y;
+        vertices[i].u = 1.f;
+        vertices[i].v = 1.f;
+    }
+
+    resources->mesh.vbo = renderer_get_vertex_buffer(
+        resources->physical_device,
+        resources->device,
+        resources->command_pool,
+        vertices,
+        i
+    );
+
+    uint32_t* indices = malloc(mesh->mNumFaces * 3 * sizeof(*indices));
+    assert(indices);
+
+    for (i=0; i<mesh->mNumFaces * 3; i++) {
+        indices[i] = mesh->mFaces[(int)(i/3.f)].mIndices[i%3];
+    }
+
+    resources->mesh.ibo = renderer_get_index_buffer(
+        resources->physical_device,
+        resources->device,
+        resources->command_pool,
+        indices,
+        i
+    );
+
+    aiReleaseImport(scene);
+
+    free(vertices);
+    free(indices);
 }

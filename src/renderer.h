@@ -44,6 +44,13 @@ struct swapchain_buffer
     VkCommandBuffer cmd_buffer;
 };
 
+struct renderer_mesh
+{
+    struct renderer_buffer vbo;
+    struct renderer_buffer ibo;
+    struct renderer_image* texture;
+};
+
 struct renderer_resources
 {
     VkInstance instance;
@@ -58,6 +65,12 @@ struct renderer_resources
     struct renderer_image depth_image;
     VkRenderPass render_pass;
     VkFramebuffer* framebuffers;
+    struct renderer_buffer uniform_buffer;
+
+    struct renderer_mesh mesh;
+    VkDescriptorPool descriptor_pool;
+    VkDescriptorSetLayout descriptor_layout;
+    VkDescriptorSet descriptor_set;
 };
 
 void renderer_create_resources(
@@ -67,7 +80,6 @@ void renderer_create_resources(
 void renderer_destroy_resources(
     struct renderer_resources* resources
 );
-void renderer_create_base_pipeline();
 
 VkInstance renderer_get_instance();
 
@@ -224,6 +236,14 @@ struct renderer_buffer renderer_get_vertex_buffer(
     uint32_t vertex_count
 );
 
+struct renderer_buffer renderer_get_index_buffer(
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    VkCommandPool command_pool,
+    uint32_t* indices,
+    uint32_t index_count
+);
+
 struct renderer_buffer renderer_get_uniform_buffer(
     VkPhysicalDevice physical_device,
     VkDevice device
@@ -329,6 +349,19 @@ VkPipelineLayout renderer_get_pipeline_layout(
 VkPipeline renderer_get_graphics_pipeline(
     VkDevice device,
     VkGraphicsPipelineCreateInfo* create_info
+);
+
+VkPipeline renderer_get_base_graphics_pipeline(
+    VkDevice device,
+    VkExtent2D swapchain_extent,
+    VkRenderPass render_pass,
+    uint32_t subpass,
+    VkDescriptorSetLayout* descriptor_layouts,
+    uint32_t descriptor_layout_count
+);
+
+void renderer_load_textured_model(
+    struct renderer_resources* resources
 );
 
 #endif
