@@ -8,6 +8,8 @@
 #include <assimp/postprocess.h>
 #include <assimp/vector3.h>
 
+#include "linmath.h"
+
 #include "renderer.h"
 
 #define APP_NAME "Cave Explorer 2"
@@ -80,8 +82,7 @@ void renderer_create_resources(
         resources->surface
     );
 
-    VkExtent2D image_extent;
-    image_extent = renderer_get_image_extent(
+    resources->swapchain_extent = renderer_get_swapchain_extent(
         resources->physical_device,
         resources->surface,
         640,
@@ -93,7 +94,7 @@ void renderer_create_resources(
         resources->device,
         resources->surface,
         image_format,
-        image_extent,
+        resources->swapchain_extent,
         VK_NULL_HANDLE
     );
     assert(resources->swapchain != VK_NULL_HANDLE);
@@ -124,7 +125,7 @@ void renderer_create_resources(
         resources->physical_device,
         resources->device,
         resources->command_pool,
-        image_extent,
+        resources->swapchain_extent,
         depth_format
     );
 
@@ -142,7 +143,7 @@ void renderer_create_resources(
     renderer_create_framebuffers(
         resources->device,
         resources->render_pass,
-        image_extent,
+        resources->swapchain_extent,
         resources->swapchain_buffers,
         resources->depth_image.image_view,
         resources->framebuffers,
@@ -164,7 +165,86 @@ void renderer_create_resources(
         resources->device
     );
 
+    resources->base_graphics_pipeline_layout = renderer_get_pipeline_layout(
+        resources->device,
+        &resources->descriptor_layout,
+        1,
+        NULL,
+        0
+    );
+
+    resources->base_graphics_pipeline = renderer_get_base_graphics_pipeline(
+        resources->device,
+        resources->swapchain_extent,
+        resources->base_graphics_pipeline_layout,
+        resources->render_pass,
+        0
+    );
+
     renderer_load_textured_model(resources);
+}
+
+void renderer_render(
+        struct renderer_resources* resources)
+{
+    renderer_update_uniform_buffer(
+        &resources->uniform_buffer,
+        resources->swapchain_extent
+    );
+
+    uint32_t image_index;
+    VkResult result;
+    result = vkAcquireNextImageKHR(
+        resources->device,
+        resources->swapchain,
+        UINT64_MAX,
+        resources->image_available,
+        VK_NULL_HANDLE,
+        &image_index
+    );
+    assert(result == VK_SUCCESS);
+
+    VkSemaphore wait_semaphores[] = {resources->image_available};
+    VkPipelineStageFlags wait_stages[] = {
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+    };
+
+    VkSemaphore signal_semaphores[] = {resources->render_finished};
+
+    VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = NULL,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = wait_semaphores,
+        .pWaitDstStageMask = wait_stages,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &resources->swapchain_buffers[image_index].cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = signal_semaphores
+    };
+
+    result = vkQueueSubmit(
+        resources->graphics_queue,
+        1,
+        &submit_info,
+        VK_NULL_HANDLE
+    );
+    assert(result == VK_SUCCESS);
+
+    VkSwapchainKHR swapchains[] = {resources->swapchain};
+
+	VkPresentInfoKHR present_info = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .pNext = NULL,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = signal_semaphores,
+        .swapchainCount = 1,
+        .pSwapchains = swapchains,
+        .pImageIndices = &image_index,
+        .pResults = NULL
+    };
+
+    vkQueuePresentKHR(resources->present_queue, &present_info);
 }
 
 void renderer_destroy_resources(
@@ -183,6 +263,11 @@ void renderer_destroy_resources(
     vkFreeMemory(resources->device, resources->mesh.texture->memory, NULL);
     vkDestroySampler(
             resources->device, resources->mesh.texture->sampler, NULL);
+
+    vkDestroyPipelineLayout(
+            resources->device, resources->base_graphics_pipeline_layout, NULL);
+    vkDestroyPipeline(
+            resources->device, resources->base_graphics_pipeline, NULL);
 
     vkDestroyBuffer(resources->device, resources->uniform_buffer.buffer, NULL);
     vkFreeMemory(resources->device, resources->uniform_buffer.memory, NULL);
@@ -852,7 +937,7 @@ VkSurfaceFormatKHR renderer_get_image_format(
     return image_format;
 }
 
-VkExtent2D renderer_get_image_extent(
+VkExtent2D renderer_get_swapchain_extent(
         VkPhysicalDevice physical_device,
         VkSurfaceKHR surface,
         uint32_t window_width,
@@ -893,7 +978,7 @@ VkSwapchainKHR renderer_get_swapchain(
         VkDevice device,
         VkSurfaceKHR surface,
         VkSurfaceFormatKHR image_format,
-        VkExtent2D image_extent,
+        VkExtent2D swapchain_extent,
         VkSwapchainKHR old_swapchain)
 {
     VkSwapchainKHR swapchain_handle;
@@ -991,7 +1076,7 @@ VkSwapchainKHR renderer_get_swapchain(
         .minImageCount = desired_image_count,
         .imageFormat = image_format.format,
         .imageColorSpace = image_format.colorSpace,
-        .imageExtent = image_extent,
+        .imageExtent = swapchain_extent,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
         .imageSharingMode = sharing_mode,
@@ -1816,16 +1901,38 @@ struct renderer_buffer renderer_get_uniform_buffer(
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
-
     uniform_buffer.size = uniform_buffer_size;
+
+    vkMapMemory(
+        device,
+        uniform_buffer.memory,
+        0,
+        uniform_buffer.size,
+        0,
+        &uniform_buffer.mapped
+    );
+    memset(uniform_buffer.mapped, 0, uniform_buffer.size);
 
     return uniform_buffer;
 }
 
 void renderer_update_uniform_buffer(
-        struct renderer_buffer* uniform_buffer)
+        struct renderer_buffer* uniform_buffer,
+        VkExtent2D swapchain_extent)
 {
+    mat4x4 viewprojection[2];
 
+    vec3 eye = {3.0f, 3.0f, 3.0f};
+    vec3 center = {0.0f, 0.0f, 0.0f};
+    vec3 up = {0.0f, 0.0f, 1.0f};
+    mat4x4_look_at(viewprojection[0], eye, center, up);
+
+    float aspect = (float)swapchain_extent.width/swapchain_extent.height;
+
+    mat4x4_perspective(viewprojection[1], 0.78f, aspect, 0.1f, 100.0f);
+    viewprojection[1][1][1] *= -1;
+
+    memcpy(uniform_buffer->mapped, viewprojection, 2*sizeof(mat4x4));
 }
 
 struct renderer_image renderer_get_image(
@@ -2296,44 +2403,47 @@ VkPipelineShaderStageCreateInfo renderer_get_shader_stage(
     return shader_stage_info;
 }
 
-VkPipelineVertexInputStateCreateInfo renderer_get_vertex_input_state(
-        uint32_t vertex_size,
+VkVertexInputBindingDescription renderer_get_binding_description(
         VkVertexInputRate vertex_input_rate)
+{
+    VkVertexInputBindingDescription binding_description = {
+        .binding = 0,
+        .stride = sizeof(struct renderer_vertex),
+        .inputRate = vertex_input_rate
+    };
+
+    return binding_description;
+}
+
+VkVertexInputAttributeDescription renderer_get_attribute_description(
+        uint32_t location,
+        VkFormat format,
+        uint32_t offset)
+{
+    VkVertexInputAttributeDescription attribute_description = {
+        .location = location,
+        .binding = 0,
+        .format = format,
+        .offset = offset
+    };
+
+    return attribute_description;
+}
+
+VkPipelineVertexInputStateCreateInfo renderer_get_vertex_input_state(
+        VkVertexInputBindingDescription* binding_description,
+        VkVertexInputAttributeDescription* attribute_descriptions,
+        uint32_t attribute_description_count)
 {
     VkPipelineVertexInputStateCreateInfo vertex_input_state = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .pNext = NULL,
         .flags = 0,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = binding_description,
+        .vertexAttributeDescriptionCount = attribute_description_count,
+        .pVertexAttributeDescriptions = attribute_descriptions
     };
-
-    VkVertexInputBindingDescription binding_description = {
-        .binding = 0,
-        .stride = vertex_size,
-        .inputRate = vertex_input_rate
-    };
-
-    VkVertexInputAttributeDescription position_attribute_description = {
-        .location = 0,
-        .binding = 0,
-        .format = VK_FORMAT_R32G32B32_SFLOAT,
-        .offset = offsetof(struct renderer_vertex, x)
-    };
-    VkVertexInputAttributeDescription texture_attribute_description = {
-        .location = 1,
-        .binding = 0,
-        .format = VK_FORMAT_R32G32_SFLOAT,
-        .offset = offsetof(struct renderer_vertex, u)
-    };
-
-    VkVertexInputAttributeDescription attribute_descriptions[] = {
-        position_attribute_description,
-        texture_attribute_description
-    };
-
-    vertex_input_state.vertexBindingDescriptionCount = 1;
-    vertex_input_state.pVertexBindingDescriptions = &binding_description;
-    vertex_input_state.vertexAttributeDescriptionCount = 2;
-    vertex_input_state.pVertexAttributeDescriptions = attribute_descriptions;
 
     return vertex_input_state;
 }
@@ -2589,10 +2699,9 @@ VkPipeline renderer_get_graphics_pipeline(
 VkPipeline renderer_get_base_graphics_pipeline(
         VkDevice device,
         VkExtent2D swapchain_extent,
+        VkPipelineLayout pipeline_layout,
         VkRenderPass render_pass,
-        uint32_t subpass,
-        VkDescriptorSetLayout* descriptor_layouts,
-        uint32_t descriptor_layout_count)
+        uint32_t subpass)
 {
     VkPipeline base_graphics_pipeline;
 
@@ -2620,10 +2729,35 @@ VkPipeline renderer_get_base_graphics_pipeline(
     };
     uint32_t shader_stage_count = 2;
 
+    VkVertexInputBindingDescription binding_description;
+    binding_description = renderer_get_binding_description(
+        VK_VERTEX_INPUT_RATE_VERTEX
+    );
+
+    VkVertexInputAttributeDescription position_attribute_description;
+    position_attribute_description = renderer_get_attribute_description(
+        0,
+        VK_FORMAT_R32G32B32_SFLOAT,
+        offsetof(struct renderer_vertex, x)
+    );
+
+    VkVertexInputAttributeDescription texture_attribute_description;
+    texture_attribute_description = renderer_get_attribute_description(
+        1,
+        VK_FORMAT_R32G32_SFLOAT,
+        offsetof(struct renderer_vertex, u)
+    );
+
+    VkVertexInputAttributeDescription attribute_descriptions[] = {
+        position_attribute_description,
+        texture_attribute_description
+    };
+
     VkPipelineVertexInputStateCreateInfo vertex_input_state;
     vertex_input_state = renderer_get_vertex_input_state(
-        sizeof(struct renderer_vertex),
-        VK_VERTEX_INPUT_RATE_VERTEX
+        &binding_description,
+        attribute_descriptions,
+        2
     );
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly_state;
@@ -2654,15 +2788,6 @@ VkPipeline renderer_get_base_graphics_pipeline(
     VkPipelineColorBlendStateCreateInfo color_blend_state;
     color_blend_state = renderer_get_color_blend_state(
         &color_blend_attachment, 1
-    );
-
-    VkPipelineLayout pipeline_layout;
-    pipeline_layout = renderer_get_pipeline_layout(
-        device,
-        descriptor_layouts,
-        descriptor_layout_count,
-        NULL,
-        0
     );
 
     VkGraphicsPipelineCreateInfo base_pipeline_info = {
@@ -2706,11 +2831,18 @@ void renderer_load_textured_model(
         resources->command_pool
     );
 
-    resources->mesh.texture = NULL;
-    resources->mesh.texture = malloc(sizeof(struct renderer_image));
+    resources->mesh.texture = malloc(sizeof(tex_image));
     assert(resources->mesh.texture);
-
     memcpy(resources->mesh.texture, &tex_image, sizeof(tex_image));
+
+    resources->mesh.descriptor_set = renderer_get_descriptor_set(
+        resources->device,
+        resources->descriptor_pool,
+        &resources->descriptor_layout,
+        1,
+        &resources->uniform_buffer,
+        &tex_image
+    );
 
     const struct aiScene* scene = NULL;
     scene = aiImportFile(
@@ -2766,4 +2898,123 @@ void renderer_load_textured_model(
 
     free(vertices);
     free(indices);
+}
+
+void renderer_record_draw_commands(
+        VkPipeline pipeline,
+        VkPipelineLayout pipeline_layout,
+        VkRenderPass render_pass,
+        VkExtent2D swapchain_extent,
+        VkFramebuffer* framebuffers,
+        struct swapchain_buffer* swapchain_buffers,
+        uint32_t swapchain_image_count,
+        struct renderer_mesh* mesh)
+{
+    VkCommandBufferBeginInfo cmd_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .pInheritanceInfo = NULL
+    };
+
+    VkClearValue clear_values[2];
+    clear_values[0].color.float32[0] = 0.7f;
+    clear_values[0].color.float32[1] = 0.7f;
+    clear_values[0].color.float32[2] = 0.7f;
+    clear_values[0].color.float32[3] = 1.0f;
+    clear_values[1].depthStencil.depth = 1.0f;
+    clear_values[1].depthStencil.stencil = 0;
+
+    VkRenderPassBeginInfo render_pass_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .pNext = NULL,
+        .renderPass = render_pass,
+        .renderArea.offset = {0,0},
+        .renderArea.extent = {swapchain_extent.width, swapchain_extent.height},
+        .clearValueCount = 2,
+        .pClearValues = clear_values,
+    };
+
+    uint32_t i;
+    for (i=0; i<swapchain_image_count; i++) {
+        VkResult result;
+        result = vkBeginCommandBuffer(
+            swapchain_buffers[i].cmd,
+            &cmd_begin_info
+        );
+        assert(result == VK_SUCCESS);
+
+        render_pass_info.framebuffer = framebuffers[i];
+        vkCmdBeginRenderPass(
+            swapchain_buffers[i].cmd,
+            &render_pass_info,
+            VK_SUBPASS_CONTENTS_INLINE
+        );
+
+        VkViewport viewport = {
+            .x = 0,
+            .y = 0,
+            .width = swapchain_extent.width,
+            .height = swapchain_extent.height,
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f
+        };
+        vkCmdSetViewport(swapchain_buffers[i].cmd, 0, 1, &viewport);
+
+        VkRect2D scissor = {
+            .offset = {0,0},
+            .extent = {swapchain_extent.width, swapchain_extent.height}
+        };
+        vkCmdSetScissor(swapchain_buffers[i].cmd, 0, 1, &scissor);
+
+        vkCmdBindPipeline(
+            swapchain_buffers[i].cmd,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipeline
+        );
+
+        VkDeviceSize offsets[] = {0};
+
+        vkCmdBindVertexBuffers(
+            swapchain_buffers[i].cmd,
+            0,
+            1,
+            &mesh->vbo.buffer,
+            offsets
+        );
+
+        uint32_t j;
+        for (j=0; j<1; j++) {
+            vkCmdBindIndexBuffer(
+                swapchain_buffers[i].cmd,
+                mesh->ibo.buffer,
+                0,
+                VK_INDEX_TYPE_UINT32
+            );
+
+            vkCmdBindDescriptorSets(
+                swapchain_buffers[i].cmd,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                pipeline_layout,
+                0,
+                1,
+                &mesh->descriptor_set,
+                0,
+                NULL
+            );
+
+            vkCmdDrawIndexed(
+                swapchain_buffers[i].cmd,
+                mesh->index_count,
+                1,
+                0,
+                0,
+                0
+            );
+        }
+
+        vkCmdEndRenderPass(swapchain_buffers[i].cmd);
+
+        result = vkEndCommandBuffer(swapchain_buffers[i].cmd);
+    }
 }

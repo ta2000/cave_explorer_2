@@ -1,9 +1,11 @@
 #ifndef GAME_H_
 #define GAME_H_
 
+#include "stdbool.h"
+
 struct game
 {
-    int no_warning;
+    bool running;
 };
 
 void game_init(struct game* self);

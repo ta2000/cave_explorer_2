@@ -9,6 +9,8 @@ void game_init(struct game* self)
 {
     memset(self, 0, sizeof(*self));
 
+    self->running = true;
+
 	glfwInit();
 
     assert(glfwVulkanSupported() == GLFW_TRUE);
@@ -31,8 +33,14 @@ void game_setup_renderer(struct game* self)
     //glfwSetKeyCallback(window, keyCallback);
 
     struct renderer_resources resources;
+
     renderer_create_resources(&resources, window);
     printf("Renderer created prepared successfully.\n");
+
+    while(self->running) {
+        renderer_render(&resources);
+    }
+
     renderer_destroy_resources(&resources);
     printf("Renderer resources destroyed successfully.\n");
 
