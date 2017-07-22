@@ -99,19 +99,21 @@ void renderer_create_resources(
     );
     assert(resources->swapchain != VK_NULL_HANDLE);
 
+    resources->command_pool = renderer_get_command_pool(
+        resources->physical_device,
+        resources->device
+    );
+    assert(resources->command_pool != VK_NULL_HANDLE);
+
     renderer_create_swapchain_buffers(
         resources->device,
+        resources->command_pool,
         resources->swapchain,
         image_format,
         &resources->swapchain_buffers,
         &resources->swapchain_image_count
     );
 
-    resources->command_pool = renderer_get_command_pool(
-        resources->physical_device,
-        resources->device
-    );
-    assert(resources->command_pool != VK_NULL_HANDLE);
 
     VkFormat depth_format;
     depth_format = renderer_get_depth_format(
@@ -182,6 +184,17 @@ void renderer_create_resources(
     );
 
     renderer_load_textured_model(resources);
+
+    renderer_record_draw_commands(
+        resources->base_graphics_pipeline,
+        resources->base_graphics_pipeline_layout,
+        resources->render_pass,
+        resources->swapchain_extent,
+        resources->framebuffers,
+        resources->swapchain_buffers,
+        resources->swapchain_image_count,
+        &resources->mesh
+    );
 }
 
 void renderer_render(
@@ -878,6 +891,36 @@ VkDevice renderer_get_device(
     return device_handle;
 }
 
+VkCommandPool renderer_get_command_pool(
+        VkPhysicalDevice physical_device,
+        VkDevice device)
+{
+    VkCommandPool command_pool_handle;
+    command_pool_handle = VK_NULL_HANDLE;
+
+    uint32_t graphics_family_index = renderer_get_graphics_queue(
+        physical_device
+    );
+
+    VkCommandPoolCreateInfo command_pool_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .queueFamilyIndex = graphics_family_index
+    };
+
+    VkResult result;
+    result = vkCreateCommandPool(
+        device,
+        &command_pool_info,
+        NULL,
+        &command_pool_handle
+    );
+    assert(result == VK_SUCCESS);
+
+    return command_pool_handle;
+}
+
 VkSurfaceFormatKHR renderer_get_image_format(
         VkPhysicalDevice physical_device,
         VkSurfaceKHR surface)
@@ -1111,6 +1154,7 @@ VkSwapchainKHR renderer_get_swapchain(
 
 void renderer_create_swapchain_buffers(
         VkDevice device,
+        VkCommandPool command_pool,
         VkSwapchainKHR swapchain,
         VkSurfaceFormatKHR image_format,
         struct swapchain_buffer** swapchain_buffers,
@@ -1172,39 +1216,23 @@ void renderer_create_swapchain_buffers(
             &((*swapchain_buffers)[i].image_view)
         );
         assert(result == VK_SUCCESS);
+
+        VkCommandBufferAllocateInfo cmd_alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .pNext = NULL,
+            .commandPool = command_pool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1
+        };
+        result = vkAllocateCommandBuffers(
+            device,
+            &cmd_alloc_info,
+            &((*swapchain_buffers)[i].cmd)
+        );
+        assert(result == VK_SUCCESS);
     }
 
     free(images);
-}
-
-VkCommandPool renderer_get_command_pool(
-        VkPhysicalDevice physical_device,
-        VkDevice device)
-{
-    VkCommandPool command_pool_handle;
-    command_pool_handle = VK_NULL_HANDLE;
-
-    uint32_t graphics_family_index = renderer_get_graphics_queue(
-        physical_device
-    );
-
-    VkCommandPoolCreateInfo command_pool_info = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .pNext = NULL,
-        .flags = 0,
-        .queueFamilyIndex = graphics_family_index
-    };
-
-    VkResult result;
-    result = vkCreateCommandPool(
-        device,
-        &command_pool_info,
-        NULL,
-        &command_pool_handle
-    );
-    assert(result == VK_SUCCESS);
-
-    return command_pool_handle;
 }
 
 void renderer_submit_command_buffer(

@@ -146,6 +146,11 @@ VkDevice renderer_get_device(
     const char** device_extensions
 );
 
+VkCommandPool renderer_get_command_pool(
+    VkPhysicalDevice physical_device,
+    VkDevice device
+);
+
 VkSurfaceFormatKHR renderer_get_image_format(
     VkPhysicalDevice physical_device,
     VkSurfaceKHR surface
@@ -169,15 +174,11 @@ VkSwapchainKHR renderer_get_swapchain(
 
 void renderer_create_swapchain_buffers(
     VkDevice device,
+    VkCommandPool command_pool,
     VkSwapchainKHR swapchain,
     VkSurfaceFormatKHR image_format,
     struct swapchain_buffer** swapchain_buffers,
     uint32_t* swapchain_buffer_count
-);
-
-VkCommandPool renderer_get_command_pool(
-    VkPhysicalDevice physical_device,
-    VkDevice device
 );
 
 void renderer_submit_command_buffer(
