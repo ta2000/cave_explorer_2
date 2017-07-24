@@ -114,7 +114,6 @@ void renderer_create_resources(
         &resources->swapchain_image_count
     );
 
-
     VkFormat depth_format;
     depth_format = renderer_get_depth_format(
         resources->physical_device,
@@ -195,6 +194,32 @@ void renderer_create_resources(
         resources->swapchain_image_count,
         &resources->mesh
     );
+
+    resources->image_available = renderer_get_semaphore(resources->device);
+    resources->render_finished = renderer_get_semaphore(resources->device);
+
+    uint32_t graphics_family_index = renderer_get_graphics_queue(
+        resources->physical_device
+    );
+
+    vkGetDeviceQueue(
+        resources->device,
+        graphics_family_index,
+        0,
+        &resources->graphics_queue
+    );
+
+    uint32_t present_family_index = renderer_get_present_queue(
+        resources->physical_device,
+        resources->surface
+    );
+
+    vkGetDeviceQueue(
+        resources->device,
+        present_family_index,
+        0,
+        &resources->present_queue
+    );
 }
 
 void renderer_render(
@@ -231,7 +256,7 @@ void renderer_render(
         .pWaitSemaphores = wait_semaphores,
         .pWaitDstStageMask = wait_stages,
         .commandBufferCount = 1,
-        .pCommandBuffers = &resources->swapchain_buffers[image_index].cmd,
+        .pCommandBuffers = &(resources->swapchain_buffers[image_index].cmd),
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = signal_semaphores
     };
@@ -263,7 +288,12 @@ void renderer_render(
 void renderer_destroy_resources(
         struct renderer_resources* resources)
 {
+    vkDeviceWaitIdle(resources->device);
+
     uint32_t i;
+
+    vkDestroySemaphore(resources->device, resources->image_available, NULL);
+    vkDestroySemaphore(resources->device, resources->render_finished, NULL);
 
     vkDestroyBuffer(resources->device, resources->mesh.vbo.buffer, NULL);
     vkFreeMemory(resources->device, resources->mesh.vbo.memory, NULL);
@@ -305,17 +335,23 @@ void renderer_destroy_resources(
             resources->device, resources->depth_image.image_view, NULL);
     vkFreeMemory(resources->device, resources->depth_image.memory, NULL);
 
-    vkDestroyCommandPool(resources->device, resources->command_pool, NULL);
-
     for (i=0; i<resources->swapchain_image_count; i++) {
         vkDestroyImageView(
             resources->device,
             resources->swapchain_buffers[i].image_view,
             NULL
         );
+        vkFreeCommandBuffers(
+            resources->device,
+            resources->command_pool,
+            1,
+            &resources->swapchain_buffers[i].cmd
+        );
     }
     free(resources->swapchain_buffers);
     resources->swapchain_buffers = NULL;
+
+    vkDestroyCommandPool(resources->device, resources->command_pool, NULL);
 
     vkDestroySwapchainKHR(
         resources->device,
@@ -526,7 +562,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL renderer_debug_callback(
         return VK_FALSE;
     }
 
-    fprintf(stderr, "%s\n", message);
+    fprintf(stderr, "%s\n\n", message);
 
     free(message);
 
@@ -2941,7 +2977,7 @@ void renderer_record_draw_commands(
     VkCommandBufferBeginInfo cmd_begin_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .pNext = NULL,
-        .flags = 0,
+        .flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,
         .pInheritanceInfo = NULL
     };
 
@@ -3003,7 +3039,7 @@ void renderer_record_draw_commands(
 
         VkDeviceSize offsets[] = {0};
 
-        vkCmdBindVertexBuffers(
+        /*vkCmdBindVertexBuffers(
             swapchain_buffers[i].cmd,
             0,
             1,
@@ -3037,12 +3073,36 @@ void renderer_record_draw_commands(
                 1,
                 0,
                 0,
-                0
+                VK_INDEX_TYPE_UINT32
             );
-        }
+        }*/
 
         vkCmdEndRenderPass(swapchain_buffers[i].cmd);
 
         result = vkEndCommandBuffer(swapchain_buffers[i].cmd);
+        assert(result == VK_SUCCESS);
     }
+}
+
+VkSemaphore renderer_get_semaphore(
+        VkDevice device)
+{
+    VkSemaphore semaphore_handle;
+
+    VkSemaphoreCreateInfo semaphore_info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0
+    };
+
+    VkResult result;
+    result = vkCreateSemaphore(
+        device,
+        &semaphore_info,
+        NULL,
+        &semaphore_handle
+    );
+    assert(result == VK_SUCCESS);
+
+    return semaphore_handle;
 }

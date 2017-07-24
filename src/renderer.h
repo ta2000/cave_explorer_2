@@ -405,4 +405,8 @@ void renderer_record_draw_commands(
     struct renderer_mesh* mesh
 );
 
+VkSemaphore renderer_get_semaphore(
+    VkDevice device
+);
+
 #endif

@@ -37,7 +37,8 @@ void game_setup_renderer(struct game* self)
     renderer_create_resources(&resources, window);
     printf("Renderer created prepared successfully.\n");
 
-    while(self->running) {
+    while(!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
         renderer_render(&resources);
     }
 
