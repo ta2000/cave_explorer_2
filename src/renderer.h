@@ -70,6 +70,7 @@ struct renderer_resources
     VkRenderPass render_pass;
     VkFramebuffer* framebuffers;
     struct renderer_buffer uniform_buffer;
+    struct renderer_buffer uniform_staging_buffer;
     VkPipelineLayout base_graphics_pipeline_layout;
     VkPipeline base_graphics_pipeline;
     VkSemaphore image_available;

@@ -82,11 +82,13 @@ void renderer_create_resources(
         resources->surface
     );
 
+    int window_width, window_height;
+    glfwGetWindowSize(window, &window_width, &window_height);
     resources->swapchain_extent = renderer_get_swapchain_extent(
         resources->physical_device,
         resources->surface,
-        640,
-        480
+        window_width,
+        window_height
     );
 
     resources->swapchain = renderer_get_swapchain(
@@ -1975,7 +1977,6 @@ struct renderer_buffer renderer_get_uniform_buffer(
         0,
         &uniform_buffer.mapped
     );
-    memset(uniform_buffer.mapped, 0, uniform_buffer.size);
 
     return uniform_buffer;
 }
@@ -1986,7 +1987,7 @@ void renderer_update_uniform_buffer(
 {
     mat4x4 viewprojection[2];
 
-    vec3 eye = {3.0f, 3.0f, 3.0f};
+    vec3 eye = {12.0f, 12.0f, 12.0f};
     vec3 center = {0.0f, 0.0f, 0.0f};
     vec3 up = {0.0f, 0.0f, 1.0f};
     mat4x4_look_at(viewprojection[0], eye, center, up);
@@ -1996,6 +1997,11 @@ void renderer_update_uniform_buffer(
     mat4x4_perspective(viewprojection[1], 0.78f, aspect, 0.1f, 100.0f);
     viewprojection[1][1][1] *= -1;
 
+    memset(uniform_buffer->mapped, 0, 3*sizeof(mat4x4));
+    ((float*)uniform_buffer->mapped)[16] = 1.f;
+    ((float*)uniform_buffer->mapped)[21] = 1.f;
+    ((float*)uniform_buffer->mapped)[26] = 1.f;
+    ((float*)uniform_buffer->mapped)[31] = 1.f;
     memcpy(uniform_buffer->mapped, viewprojection, 2*sizeof(mat4x4));
 }
 
@@ -2873,7 +2879,7 @@ VkPipeline renderer_get_base_graphics_pipeline(
         .renderPass = render_pass,
         .subpass = subpass,
         .basePipelineHandle = VK_NULL_HANDLE,
-        .basePipelineIndex = 0
+        .basePipelineIndex = -1
     };
 
     base_graphics_pipeline = renderer_get_graphics_pipeline(
@@ -2889,7 +2895,7 @@ void renderer_load_textured_model(
 {
     struct renderer_image tex_image;
     tex_image = renderer_load_texture(
-        "assets/textures/plasma.png",
+        "assets/textures/robot-texture.png",
         resources->physical_device,
         resources->device,
         resources->command_pool
@@ -2910,7 +2916,7 @@ void renderer_load_textured_model(
 
     const struct aiScene* scene = NULL;
     scene = aiImportFile(
-        "assets/models/sphere.dae",
+        "assets/models/robot.dae",
         aiProcess_Triangulate |
         aiProcess_GenSmoothNormals |
         aiProcess_FlipUVs |
@@ -2929,18 +2935,17 @@ void renderer_load_textured_model(
         vertices[i].x = mesh->mVertices[i].x;
         vertices[i].y = mesh->mVertices[i].y;
         vertices[i].z = mesh->mVertices[i].z;
-        //vertices[i].u = mesh->mTextureCoords[0][i].x;
-        //vertices[i].v = mesh->mTextureCoords[0][i].y;
-        vertices[i].u = 1.f;
-        vertices[i].v = 1.f;
+        vertices[i].u = mesh->mTextureCoords[0][i].x;
+        vertices[i].v = mesh->mTextureCoords[0][i].y;
     }
+    resources->mesh.vertex_count = i;
 
     resources->mesh.vbo = renderer_get_vertex_buffer(
         resources->physical_device,
         resources->device,
         resources->command_pool,
         vertices,
-        i
+        resources->mesh.vertex_count
     );
 
     uint32_t* indices = malloc(mesh->mNumFaces * 3 * sizeof(*indices));
@@ -2949,13 +2954,14 @@ void renderer_load_textured_model(
     for (i=0; i<mesh->mNumFaces * 3; i++) {
         indices[i] = mesh->mFaces[(int)(i/3.f)].mIndices[i%3];
     }
+    resources->mesh.index_count = i;
 
     resources->mesh.ibo = renderer_get_index_buffer(
         resources->physical_device,
         resources->device,
         resources->command_pool,
         indices,
-        i
+        resources->mesh.index_count
     );
 
     aiReleaseImport(scene);
@@ -3039,7 +3045,7 @@ void renderer_record_draw_commands(
 
         VkDeviceSize offsets[] = {0};
 
-        /*vkCmdBindVertexBuffers(
+        vkCmdBindVertexBuffers(
             swapchain_buffers[i].cmd,
             0,
             1,
@@ -3047,35 +3053,32 @@ void renderer_record_draw_commands(
             offsets
         );
 
-        uint32_t j;
-        for (j=0; j<1; j++) {
-            vkCmdBindIndexBuffer(
-                swapchain_buffers[i].cmd,
-                mesh->ibo.buffer,
-                0,
-                VK_INDEX_TYPE_UINT32
-            );
+        vkCmdBindIndexBuffer(
+            swapchain_buffers[i].cmd,
+            mesh->ibo.buffer,
+            0,
+            VK_INDEX_TYPE_UINT32
+        );
 
-            vkCmdBindDescriptorSets(
-                swapchain_buffers[i].cmd,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                pipeline_layout,
-                0,
-                1,
-                &mesh->descriptor_set,
-                0,
-                NULL
-            );
+        vkCmdBindDescriptorSets(
+            swapchain_buffers[i].cmd,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipeline_layout,
+            0,
+            1,
+            &mesh->descriptor_set,
+            0,
+            NULL
+        );
 
-            vkCmdDrawIndexed(
-                swapchain_buffers[i].cmd,
-                mesh->index_count,
-                1,
-                0,
-                0,
-                VK_INDEX_TYPE_UINT32
-            );
-        }*/
+        vkCmdDrawIndexed(
+            swapchain_buffers[i].cmd,
+            mesh->index_count,
+            1,
+            0,
+            0,
+            0
+        );
 
         vkCmdEndRenderPass(swapchain_buffers[i].cmd);
 
