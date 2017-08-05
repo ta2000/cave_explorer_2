@@ -70,7 +70,7 @@ struct renderer_resources
     VkRenderPass render_pass;
     VkFramebuffer* framebuffers;
     struct renderer_buffer uniform_buffer;
-    struct renderer_buffer uniform_staging_buffer;
+    struct renderer_buffer staging_uniform_buffer;
     VkPipelineLayout base_graphics_pipeline_layout;
     VkPipeline base_graphics_pipeline;
     VkSemaphore image_available;
@@ -173,13 +173,18 @@ VkSwapchainKHR renderer_get_swapchain(
     VkSwapchainKHR old_swapchain
 );
 
+uint32_t renderer_get_swapchain_image_count(
+    VkDevice device,
+    VkSwapchainKHR swapchain
+);
+
 void renderer_create_swapchain_buffers(
     VkDevice device,
     VkCommandPool command_pool,
     VkSwapchainKHR swapchain,
-    VkSurfaceFormatKHR image_format,
-    struct swapchain_buffer** swapchain_buffers,
-    uint32_t* swapchain_buffer_count
+    VkSurfaceFormatKHR swapchain_image_format,
+    struct swapchain_buffer* swapchain_buffers,
+    uint32_t swapchain_buffer_count
 );
 
 void renderer_submit_command_buffer(
@@ -262,12 +267,17 @@ struct renderer_buffer renderer_get_index_buffer(
 
 struct renderer_buffer renderer_get_uniform_buffer(
     VkPhysicalDevice physical_device,
-    VkDevice device
+    VkDevice device,
+    struct renderer_buffer* staging_buffer
 );
 
 void renderer_update_uniform_buffer(
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    VkCommandPool command_pool,
+    VkExtent2D swapchain_extent,
     struct renderer_buffer* uniform_buffer,
-    VkExtent2D swapchain_extent
+    struct renderer_buffer* staging_buffer
 );
 
 struct renderer_image renderer_get_image(
@@ -304,11 +314,14 @@ VkDescriptorSet renderer_get_descriptor_set(
     struct renderer_image* tex_image
 );
 
-VkPipelineShaderStageCreateInfo renderer_get_shader_stage(
-    const char* fname,
+VkShaderModule renderer_get_shader_module(
     VkDevice device,
-    char** shader_code_buffer,
-    VkShaderStageFlagBits stage
+    const char* fname
+);
+
+VkPipelineShaderStageCreateInfo renderer_get_shader_stage(
+    VkShaderStageFlagBits stage,
+    VkShaderModule module
 );
 
 VkVertexInputBindingDescription renderer_get_binding_description(

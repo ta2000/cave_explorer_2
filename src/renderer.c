@@ -12,7 +12,7 @@
 
 #include "renderer.h"
 
-#define APP_NAME "Cave Explorer 2"
+#define APP_NAME "Game"
 #define APP_VERSION_MAJOR 1
 #define APP_VERSION_MINOR 0
 #define APP_VERSION_PATCH 0
@@ -60,12 +60,12 @@ void renderer_create_resources(
 
 	VkPhysicalDeviceFeatures required_features;
     memset(&required_features, VK_FALSE, sizeof(required_features));
-    required_features.geometryShader = VK_TRUE;
+    /*required_features.geometryShader = VK_TRUE;
     required_features.tessellationShader = VK_TRUE;
     required_features.fullDrawIndexUint32 = VK_TRUE;
     required_features.imageCubeArray = VK_TRUE;
     required_features.sampleRateShading = VK_TRUE;
-    required_features.samplerAnisotropy = VK_TRUE;
+    required_features.samplerAnisotropy = VK_TRUE;*/
 
     resources->device = renderer_get_device(
         resources->physical_device,
@@ -107,13 +107,22 @@ void renderer_create_resources(
     );
     assert(resources->command_pool != VK_NULL_HANDLE);
 
+    resources->swapchain_image_count = renderer_get_swapchain_image_count(
+        resources->device,
+        resources->swapchain
+    );
+
+    resources->swapchain_buffers = malloc(
+        resources->swapchain_image_count * sizeof(*resources->swapchain_buffers)
+    );
+
     renderer_create_swapchain_buffers(
         resources->device,
         resources->command_pool,
         resources->swapchain,
         image_format,
-        &resources->swapchain_buffers,
-        &resources->swapchain_image_count
+        resources->swapchain_buffers,
+        resources->swapchain_image_count
     );
 
     VkFormat depth_format;
@@ -165,7 +174,8 @@ void renderer_create_resources(
 
     resources->uniform_buffer = renderer_get_uniform_buffer(
         resources->physical_device,
-        resources->device
+        resources->device,
+        &resources->staging_uniform_buffer
     );
 
     resources->base_graphics_pipeline_layout = renderer_get_pipeline_layout(
@@ -228,8 +238,12 @@ void renderer_render(
         struct renderer_resources* resources)
 {
     renderer_update_uniform_buffer(
+        resources->physical_device,
+        resources->device,
+        resources->command_pool,
+        resources->swapchain_extent,
         &resources->uniform_buffer,
-        resources->swapchain_extent
+        &resources->staging_uniform_buffer
     );
 
     uint32_t image_index;
@@ -308,12 +322,17 @@ void renderer_destroy_resources(
     vkFreeMemory(resources->device, resources->mesh.texture->memory, NULL);
     vkDestroySampler(
             resources->device, resources->mesh.texture->sampler, NULL);
+    free(resources->mesh.texture);
 
     vkDestroyPipelineLayout(
             resources->device, resources->base_graphics_pipeline_layout, NULL);
     vkDestroyPipeline(
             resources->device, resources->base_graphics_pipeline, NULL);
 
+    vkDestroyBuffer(
+            resources->device, resources->staging_uniform_buffer.buffer, NULL);
+    vkFreeMemory(
+            resources->device, resources->staging_uniform_buffer.memory, NULL);
     vkDestroyBuffer(resources->device, resources->uniform_buffer.buffer, NULL);
     vkFreeMemory(resources->device, resources->uniform_buffer.memory, NULL);
 
@@ -1190,87 +1209,91 @@ VkSwapchainKHR renderer_get_swapchain(
     return swapchain_handle;
 }
 
+uint32_t renderer_get_swapchain_image_count(
+        VkDevice device,
+        VkSwapchainKHR swapchain)
+{
+    uint32_t image_count;
+    vkGetSwapchainImagesKHR(
+        device,
+        swapchain,
+        &image_count,
+        NULL
+    );
+    return image_count;
+}
+
 void renderer_create_swapchain_buffers(
         VkDevice device,
         VkCommandPool command_pool,
         VkSwapchainKHR swapchain,
-        VkSurfaceFormatKHR image_format,
-        struct swapchain_buffer** swapchain_buffers,
-        uint32_t* image_count)
+        VkSurfaceFormatKHR swapchain_image_format,
+        struct swapchain_buffer* swapchain_buffers,
+        uint32_t swapchain_image_count)
 {
-    vkGetSwapchainImagesKHR(
-        device,
-        swapchain,
-        image_count,
-        NULL
-    );
-
-    VkImage* images = NULL;
-    images = malloc((*image_count) * sizeof(*images));
+    VkImage* images;
+    images = malloc(swapchain_image_count * sizeof(*images));
     assert(images);
 
-    *swapchain_buffers = malloc((*image_count) * sizeof(**swapchain_buffers));
-    assert(*swapchain_buffers);
-
-    vkGetSwapchainImagesKHR(
+    VkResult result;
+    result = vkGetSwapchainImagesKHR(
         device,
         swapchain,
-        image_count,
+        &swapchain_image_count,
         images
     );
+    assert(result == VK_SUCCESS);
+
+    VkCommandBufferAllocateInfo cmd_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = NULL,
+        .commandPool = command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+
+    VkImageViewCreateInfo view_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .format = swapchain_image_format.format,
+        .components = {
+             .r = VK_COMPONENT_SWIZZLE_R,
+             .g = VK_COMPONENT_SWIZZLE_G,
+             .b = VK_COMPONENT_SWIZZLE_B,
+             .a = VK_COMPONENT_SWIZZLE_A
+        },
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        },
+        .viewType = VK_IMAGE_VIEW_TYPE_2D
+    };
 
     uint32_t i;
-    for (i=0; i<(*image_count); i++)
+    for (i=0; i<swapchain_image_count; i++)
     {
-        VkImageViewCreateInfo view_info = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .pNext = NULL,
-            .flags = 0,
-            .image = images[i],
-            .format = image_format.format,
-            .components = {
-                 .r = VK_COMPONENT_SWIZZLE_R,
-                 .g = VK_COMPONENT_SWIZZLE_G,
-                 .b = VK_COMPONENT_SWIZZLE_B,
-                 .a = VK_COMPONENT_SWIZZLE_A,
-            },
-            .subresourceRange = {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1
-            },
-            .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        };
+        result = vkAllocateCommandBuffers(
+            device,
+            &cmd_alloc_info,
+            &swapchain_buffers[i].cmd
+        );
+        assert(result == VK_SUCCESS);
 
-        (*swapchain_buffers)[i].image = images[i];
+        swapchain_buffers[i].image = images[i];
+        view_info.image = swapchain_buffers[i].image;
 
-        VkResult result;
         result = vkCreateImageView(
             device,
             &view_info,
             NULL,
-            &((*swapchain_buffers)[i].image_view)
-        );
-        assert(result == VK_SUCCESS);
-
-        VkCommandBufferAllocateInfo cmd_alloc_info = {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .pNext = NULL,
-            .commandPool = command_pool,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1
-        };
-        result = vkAllocateCommandBuffers(
-            device,
-            &cmd_alloc_info,
-            &((*swapchain_buffers)[i].cmd)
+            &swapchain_buffers[i].image_view
         );
         assert(result == VK_SUCCESS);
     }
-
-    free(images);
 }
 
 void renderer_submit_command_buffer(
@@ -1429,10 +1452,11 @@ uint32_t renderer_find_memory_type(
     for (i=0; i<memory_type_count; ++i)
     {
         if ((memory_type_bits & (1 << i)) &&
-            ((memory_types[i].propertyFlags & properties) == properties))
+            (memory_types[i].propertyFlags & properties) == properties)
         {
             memory_type = i;
             memory_type_found = true;
+            break;
         }
     }
 
@@ -1955,37 +1979,46 @@ struct renderer_buffer renderer_get_index_buffer(
 
 struct renderer_buffer renderer_get_uniform_buffer(
         VkPhysicalDevice physical_device,
-        VkDevice device)
+        VkDevice device,
+        struct renderer_buffer* staging_buffer)
 {
     struct renderer_buffer uniform_buffer;
     uint32_t uniform_buffer_size = sizeof(float) * 16 * 3;
-    uniform_buffer = renderer_get_buffer(
+
+    *staging_buffer = renderer_get_buffer(
         physical_device,
         device,
         uniform_buffer_size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
-    uniform_buffer.size = uniform_buffer_size;
+    staging_buffer->size = uniform_buffer_size;
 
-    vkMapMemory(
+    uniform_buffer = renderer_get_buffer(
+        physical_device,
         device,
-        uniform_buffer.memory,
-        0,
-        uniform_buffer.size,
-        0,
-        &uniform_buffer.mapped
+        uniform_buffer_size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
+    uniform_buffer.size = uniform_buffer_size;
 
     return uniform_buffer;
 }
 
 void renderer_update_uniform_buffer(
+        VkPhysicalDevice physical_device,
+        VkDevice device,
+        VkCommandPool command_pool,
+        VkExtent2D swapchain_extent,
         struct renderer_buffer* uniform_buffer,
-        VkExtent2D swapchain_extent)
+        struct renderer_buffer* staging_buffer)
 {
     mat4x4 viewprojection[2];
+    memset(viewprojection, 0, sizeof(viewprojection));
 
     vec3 eye = {12.0f, 12.0f, 12.0f};
     vec3 center = {0.0f, 0.0f, 0.0f};
@@ -1997,12 +2030,69 @@ void renderer_update_uniform_buffer(
     mat4x4_perspective(viewprojection[1], 0.78f, aspect, 0.1f, 100.0f);
     viewprojection[1][1][1] *= -1;
 
+    vkMapMemory(
+        device,
+        staging_buffer->memory,
+        0,
+        uniform_buffer->size,
+        0,
+        &uniform_buffer->mapped
+    );
     memset(uniform_buffer->mapped, 0, 3*sizeof(mat4x4));
     ((float*)uniform_buffer->mapped)[16] = 1.f;
     ((float*)uniform_buffer->mapped)[21] = 1.f;
     ((float*)uniform_buffer->mapped)[26] = 1.f;
     ((float*)uniform_buffer->mapped)[31] = 1.f;
     memcpy(uniform_buffer->mapped, viewprojection, 2*sizeof(mat4x4));
+    vkUnmapMemory(device, staging_buffer->memory);
+
+    VkCommandBuffer copy_cmd;
+    VkCommandBufferAllocateInfo cmd_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = NULL,
+        .commandPool = command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    VkResult result;
+    result = vkAllocateCommandBuffers(device, &cmd_alloc_info, &copy_cmd);
+    assert(result == VK_SUCCESS);
+
+    VkCommandBufferBeginInfo cmd_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = NULL,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = NULL
+    };
+    result = vkBeginCommandBuffer(copy_cmd, &cmd_begin_info);
+    assert(result == VK_SUCCESS);
+
+    VkBufferCopy region = {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = uniform_buffer->size
+    };
+
+    vkCmdCopyBuffer(
+        copy_cmd,
+        staging_buffer->buffer,
+        uniform_buffer->buffer,
+        1,
+        &region
+    );
+
+    renderer_submit_command_buffer(
+        physical_device,
+        device,
+        &copy_cmd
+    );
+
+    vkFreeCommandBuffers(
+        device,
+        command_pool,
+        1,
+        &copy_cmd
+    );
 }
 
 struct renderer_image renderer_get_image(
@@ -2097,7 +2187,7 @@ struct renderer_image renderer_load_texture(
 
     tex_image.width = tex_width;
     tex_image.height = tex_height;
-    tex_image.size = tex_width * tex_height * tex_channels;
+    tex_image.size = tex_width * tex_height * 4;
 
     struct renderer_buffer staging_buffer;
     staging_buffer = renderer_get_buffer(
@@ -2238,7 +2328,7 @@ struct renderer_image renderer_load_texture(
 		.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
 		.mipLodBias =0.0f,
 		.anisotropyEnable = VK_TRUE,
-		.maxAnisotropy = 16,
+		.maxAnisotropy = 1.0f,
 		.compareEnable = VK_FALSE,
 		.compareOp = VK_COMPARE_OP_ALWAYS,
 		.minLod = 0.0f,
@@ -2283,7 +2373,7 @@ VkDescriptorPool renderer_get_descriptor_pool(
         .pNext = NULL,
         .flags = 0,
         .maxSets = 1,
-        .poolSizeCount = sizeof(pool_sizes)/sizeof(pool_sizes[0]),
+        .poolSizeCount = 2,
         .pPoolSizes = pool_sizes
     };
 
@@ -2421,20 +2511,11 @@ VkDescriptorSet renderer_get_descriptor_set(
     return descriptor_set_handle;
 }
 
-VkPipelineShaderStageCreateInfo renderer_get_shader_stage(
-        const char* fname,
+VkShaderModule renderer_get_shader_module(
         VkDevice device,
-        char** shader_code_buffer,
-        VkShaderStageFlagBits stage)
+        const char* fname)
 {
-    VkPipelineShaderStageCreateInfo shader_stage_info = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .pNext = NULL,
-        .flags = 0,
-        .stage = stage,
-        .pName = "main",
-        .pSpecializationInfo = NULL
-    };
+    VkShaderModule module;
 
     FILE* fp = fopen(fname, "r");
     assert(fp);
@@ -2444,11 +2525,12 @@ VkPipelineShaderStageCreateInfo renderer_get_shader_stage(
     code_size = ftell(fp);
     rewind(fp);
 
-    *shader_code_buffer = malloc(code_size);
-    assert(*shader_code_buffer);
+    char* shader_code_buffer;
+    shader_code_buffer = malloc(code_size);
+    assert(shader_code_buffer);
 
     size_t bytes_read;
-    bytes_read = fread(*shader_code_buffer, 1, code_size, fp);
+    bytes_read = fread(shader_code_buffer, 1, code_size, fp);
     assert(bytes_read);
 
     VkShaderModuleCreateInfo shader_module_info = {
@@ -2456,10 +2538,9 @@ VkPipelineShaderStageCreateInfo renderer_get_shader_stage(
         .pNext = NULL,
         .flags = 0,
         .codeSize = code_size,
-        .pCode = (uint32_t*)(*shader_code_buffer)
+        .pCode = (uint32_t*)(shader_code_buffer)
     };
 
-    VkShaderModule module;
     VkResult result;
     result = vkCreateShaderModule(
         device,
@@ -2468,6 +2549,26 @@ VkPipelineShaderStageCreateInfo renderer_get_shader_stage(
         &module
     );
     assert(result == VK_SUCCESS);
+
+    free(shader_code_buffer);
+
+    return module;
+}
+
+VkPipelineShaderStageCreateInfo renderer_get_shader_stage(
+        VkShaderStageFlagBits stage,
+        VkShaderModule module)
+{
+    VkPipelineShaderStageCreateInfo shader_stage_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .stage = stage,
+        .module = module,
+        .pName = "main",
+        .pSpecializationInfo = NULL
+    };
+
     shader_stage_info.module = module;
 
     return shader_stage_info;
@@ -2775,22 +2876,26 @@ VkPipeline renderer_get_base_graphics_pipeline(
 {
     VkPipeline base_graphics_pipeline;
 
-    char* vert_code_buffer;
+    VkShaderModule vert_shader_module;
+    vert_shader_module = renderer_get_shader_module(
+        device,
+        "assets/shaders/vert.spv"
+    );
     VkPipelineShaderStageCreateInfo vert_shader_stage;
     vert_shader_stage = renderer_get_shader_stage(
-        "assets/shaders/vert.spv",
-        device,
-        &vert_code_buffer,
-        VK_SHADER_STAGE_VERTEX_BIT
+        VK_SHADER_STAGE_VERTEX_BIT,
+        vert_shader_module
     );
 
-    char* frag_code_buffer;
+    VkShaderModule frag_shader_module;
+    frag_shader_module = renderer_get_shader_module(
+        device,
+        "assets/shaders/frag.spv"
+    );
     VkPipelineShaderStageCreateInfo frag_shader_stage;
     frag_shader_stage = renderer_get_shader_stage(
-        "assets/shaders/frag.spv",
-        device,
-        &frag_code_buffer,
-        VK_SHADER_STAGE_FRAGMENT_BIT
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        frag_shader_module
     );
 
     VkPipelineShaderStageCreateInfo shader_stages[] = {
@@ -2886,6 +2991,9 @@ VkPipeline renderer_get_base_graphics_pipeline(
         device,
         &base_pipeline_info
     );
+
+    vkDestroyShaderModule(device, vert_shader_module, NULL);
+    vkDestroyShaderModule(device, frag_shader_module, NULL);
 
     return base_graphics_pipeline;
 }
