@@ -76,6 +76,27 @@ void renderer_create_resources(
     );
     assert(resources->device != VK_NULL_HANDLE);
 
+    uint32_t graphics_family_index = renderer_get_graphics_queue(
+        resources->physical_device
+    );
+    vkGetDeviceQueue(
+        resources->device,
+        graphics_family_index,
+        0,
+        &resources->graphics_queue
+    );
+
+    uint32_t present_family_index = renderer_get_present_queue(
+        resources->physical_device,
+        resources->surface
+    );
+    vkGetDeviceQueue(
+        resources->device,
+        present_family_index,
+        0,
+        &resources->present_queue
+    );
+
     VkSurfaceFormatKHR image_format;
     image_format = renderer_get_image_format(
         resources->physical_device,
@@ -136,6 +157,7 @@ void renderer_create_resources(
     resources->depth_image = renderer_get_depth_image(
         resources->physical_device,
         resources->device,
+        resources->graphics_queue,
         resources->command_pool,
         resources->swapchain_extent,
         depth_format
@@ -209,29 +231,6 @@ void renderer_create_resources(
 
     resources->image_available = renderer_get_semaphore(resources->device);
     resources->render_finished = renderer_get_semaphore(resources->device);
-
-    uint32_t graphics_family_index = renderer_get_graphics_queue(
-        resources->physical_device
-    );
-
-    vkGetDeviceQueue(
-        resources->device,
-        graphics_family_index,
-        0,
-        &resources->graphics_queue
-    );
-
-    uint32_t present_family_index = renderer_get_present_queue(
-        resources->physical_device,
-        resources->surface
-    );
-
-    vkGetDeviceQueue(
-        resources->device,
-        present_family_index,
-        0,
-        &resources->present_queue
-    );
 }
 
 void renderer_render(
@@ -240,6 +239,7 @@ void renderer_render(
     renderer_update_uniform_buffer(
         resources->physical_device,
         resources->device,
+        resources->graphics_queue,
         resources->command_pool,
         resources->swapchain_extent,
         &resources->uniform_buffer,
@@ -1299,6 +1299,7 @@ void renderer_create_swapchain_buffers(
 void renderer_submit_command_buffer(
         VkPhysicalDevice physical_device,
         VkDevice device,
+        VkQueue queue,
         VkCommandBuffer* cmd)
 {
     vkEndCommandBuffer(*cmd);
@@ -1315,32 +1316,22 @@ void renderer_submit_command_buffer(
         .pSignalSemaphores = NULL
     };
 
-    uint32_t graphics_family_index;
-    graphics_family_index = renderer_get_graphics_queue(physical_device);
-
-    VkQueue graphics_queue;
-    vkGetDeviceQueue(
-        device,
-        graphics_family_index,
-        0,
-        &graphics_queue
-    );
-
     VkResult result;
     result = vkQueueSubmit(
-        graphics_queue,
+        queue,
         1,
         &submit_info,
         VK_NULL_HANDLE
     );
     assert(result == VK_SUCCESS);
 
-    vkQueueWaitIdle(graphics_queue);
+    vkQueueWaitIdle(queue);
 }
 
 void renderer_change_image_layout(
         VkPhysicalDevice physical_device,
         VkDevice device,
+        VkQueue queue,
         VkCommandPool command_pool,
         VkImage image,
         VkImageLayout old_layout,
@@ -1429,7 +1420,12 @@ void renderer_change_image_layout(
         &memory_barrier
     );
 
-    renderer_submit_command_buffer(physical_device, device, &cmd);
+    renderer_submit_command_buffer(
+        physical_device,
+        device,
+        queue,
+        &cmd
+    );
 
     vkFreeCommandBuffers(
         device,
@@ -1506,6 +1502,7 @@ VkFormat renderer_get_depth_format(
 struct renderer_image renderer_get_depth_image(
         VkPhysicalDevice physical_device,
         VkDevice device,
+        VkQueue queue,
         VkCommandPool command_pool,
         VkExtent2D extent,
         VkFormat depth_format)
@@ -1573,6 +1570,7 @@ struct renderer_image renderer_get_depth_image(
     renderer_change_image_layout(
         physical_device,
         device,
+        queue,
         command_pool,
         depth_image.image,
         VK_IMAGE_LAYOUT_UNDEFINED,
@@ -1804,6 +1802,7 @@ struct renderer_buffer renderer_get_buffer(
 struct renderer_buffer renderer_get_vertex_buffer(
         VkPhysicalDevice physical_device,
         VkDevice device,
+        VkQueue queue,
         VkCommandPool command_pool,
         struct renderer_vertex* vertices,
         uint32_t vertex_count)
@@ -1873,6 +1872,7 @@ struct renderer_buffer renderer_get_vertex_buffer(
     renderer_submit_command_buffer(
         physical_device,
         device,
+        queue,
         &copy_cmd
     );
 
@@ -1892,6 +1892,7 @@ struct renderer_buffer renderer_get_vertex_buffer(
 struct renderer_buffer renderer_get_index_buffer(
         VkPhysicalDevice physical_device,
         VkDevice device,
+        VkQueue queue,
         VkCommandPool command_pool,
         uint32_t* indices,
         uint32_t index_count)
@@ -1961,6 +1962,7 @@ struct renderer_buffer renderer_get_index_buffer(
     renderer_submit_command_buffer(
         physical_device,
         device,
+        queue,
         &copy_cmd
     );
 
@@ -2012,6 +2014,7 @@ struct renderer_buffer renderer_get_uniform_buffer(
 void renderer_update_uniform_buffer(
         VkPhysicalDevice physical_device,
         VkDevice device,
+        VkQueue queue,
         VkCommandPool command_pool,
         VkExtent2D swapchain_extent,
         struct renderer_buffer* uniform_buffer,
@@ -2084,6 +2087,7 @@ void renderer_update_uniform_buffer(
     renderer_submit_command_buffer(
         physical_device,
         device,
+        queue,
         &copy_cmd
     );
 
@@ -2159,6 +2163,7 @@ struct renderer_image renderer_load_texture(
     const char* src,
     VkPhysicalDevice physical_device,
     VkDevice device,
+    VkQueue queue,
     VkCommandPool command_pool)
 {
     struct renderer_image tex_image;
@@ -2216,6 +2221,7 @@ struct renderer_image renderer_load_texture(
     renderer_change_image_layout(
         physical_device,
         device,
+        queue,
         command_pool,
         tex_image.image,
         VK_IMAGE_LAYOUT_PREINITIALIZED,
@@ -2265,6 +2271,7 @@ struct renderer_image renderer_load_texture(
     renderer_submit_command_buffer(
         physical_device,
         device,
+        queue,
         &copy_cmd
     );
 
@@ -2278,6 +2285,7 @@ struct renderer_image renderer_load_texture(
     renderer_change_image_layout(
         physical_device,
         device,
+        queue,
         command_pool,
         tex_image.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -3006,6 +3014,7 @@ void renderer_load_textured_model(
         "assets/textures/robot-texture.png",
         resources->physical_device,
         resources->device,
+        resources->graphics_queue,
         resources->command_pool
     );
 
@@ -3051,6 +3060,7 @@ void renderer_load_textured_model(
     resources->mesh.vbo = renderer_get_vertex_buffer(
         resources->physical_device,
         resources->device,
+        resources->graphics_queue,
         resources->command_pool,
         vertices,
         resources->mesh.vertex_count
@@ -3067,6 +3077,7 @@ void renderer_load_textured_model(
     resources->mesh.ibo = renderer_get_index_buffer(
         resources->physical_device,
         resources->device,
+        resources->graphics_queue,
         resources->command_pool,
         indices,
         resources->mesh.index_count
@@ -3096,9 +3107,9 @@ void renderer_record_draw_commands(
     };
 
     VkClearValue clear_values[2];
-    clear_values[0].color.float32[0] = 0.7f;
-    clear_values[0].color.float32[1] = 0.7f;
-    clear_values[0].color.float32[2] = 0.7f;
+    clear_values[0].color.float32[0] = 0.0f;
+    clear_values[0].color.float32[1] = 0.0f;
+    clear_values[0].color.float32[2] = 0.0f;
     clear_values[0].color.float32[3] = 1.0f;
     clear_values[1].depthStencil.depth = 1.0f;
     clear_values[1].depthStencil.stencil = 0;

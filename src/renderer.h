@@ -190,12 +190,14 @@ void renderer_create_swapchain_buffers(
 void renderer_submit_command_buffer(
     VkPhysicalDevice physical_device,
     VkDevice device,
+    VkQueue queue,
     VkCommandBuffer* cmd
 );
 
 void renderer_change_image_layout(
     VkPhysicalDevice physical_device,
     VkDevice device,
+    VkQueue queue,
     VkCommandPool command_pool,
     VkImage image,
     VkImageLayout old_layout,
@@ -220,6 +222,7 @@ VkFormat renderer_get_depth_format(
 struct renderer_image renderer_get_depth_image(
     VkPhysicalDevice physical_device,
     VkDevice device,
+    VkQueue queue,
     VkCommandPool command_pool,
     VkExtent2D extent,
     VkFormat depth_format
@@ -252,6 +255,7 @@ struct renderer_buffer renderer_get_buffer(
 struct renderer_buffer renderer_get_vertex_buffer(
     VkPhysicalDevice physical_device,
     VkDevice device,
+    VkQueue queue,
     VkCommandPool command_pool,
     struct renderer_vertex* vertices,
     uint32_t vertex_count
@@ -260,6 +264,7 @@ struct renderer_buffer renderer_get_vertex_buffer(
 struct renderer_buffer renderer_get_index_buffer(
     VkPhysicalDevice physical_device,
     VkDevice device,
+    VkQueue queue,
     VkCommandPool command_pool,
     uint32_t* indices,
     uint32_t index_count
@@ -274,6 +279,7 @@ struct renderer_buffer renderer_get_uniform_buffer(
 void renderer_update_uniform_buffer(
     VkPhysicalDevice physical_device,
     VkDevice device,
+    VkQueue queue,
     VkCommandPool command_pool,
     VkExtent2D swapchain_extent,
     struct renderer_buffer* uniform_buffer,
@@ -294,6 +300,7 @@ struct renderer_image renderer_load_texture(
     const char* src,
     VkPhysicalDevice physical_device,
     VkDevice device,
+    VkQueue queue,
     VkCommandPool command_pool
 );
 
